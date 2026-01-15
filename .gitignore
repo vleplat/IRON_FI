@@ -14,3 +14,6 @@ data/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
+
+# local docs
+Steps_GitHub.rtf
