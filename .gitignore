@@ -17,3 +17,6 @@ data/
 
 # local docs
 Steps_GitHub.rtf
+
+# do not ship paper drafts in the public repo
+docs/

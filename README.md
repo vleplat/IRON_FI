@@ -142,6 +142,22 @@ Outputs:
 
 MNIST is downloaded and cached under `data/mnist/` by the loader.
 
+### MNIST download (first run)
+
+The MNIST benchmark script can download MNIST automatically and cache it locally.
+
+- **Where it is stored**: `data/mnist/`  
+  - raw `.gz` files: `data/mnist/raw/`
+  - cached arrays: `data/mnist/mnist.npz`
+
+- **How to download (first run)**:
+
+```bash
+python experiments/mnist_softmax_benchmark.py --data-dir data/mnist --download --epochs 1 --no-show
+```
+
+After this first download, you can run all MNIST experiments **without** `--download` (they will reuse `data/mnist/mnist.npz`).
+
 ### Single-run benchmark (quick check)
 
 ```bash
