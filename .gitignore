@@ -1,0 +1,16 @@
+.venv/
+.jaxvenv/
+__pycache__/
+*.pyc
+.DS_Store
+.mplcache/
+
+# generated outputs
+figs/
+logs/
+data/
+
+# editor / tooling
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/

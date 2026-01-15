@@ -1,0 +1,1183 @@
+\documentclass[smallextended,referee,envcountsect,]{svjour3}
+\smartqed
+\usepackage{times}
+
+\journalname{JOTA}
+
+% Optional math commands from https://github.com/goodfeli/dlbook_notation.
+\input{math_commands.tex}
+\usepackage{wrapfig}
+
+\usepackage{hyperref}
+
+
+\usepackage[utf8]{inputenc} % allow utf-8 input
+\usepackage[T1]{fontenc}    % use 8-bit T1 fonts
+\usepackage{url}            % simple URL typesetting
+\usepackage{booktabs}       % professional-quality tables
+\usepackage{amsfonts,amsmath,amssymb}       % blackboard math symbols
+\usepackage{nicefrac}       % compact symbols for 1/2, etc.
+\usepackage{microtype}      % microtypography
+\usepackage{xcolor}  % colors
+\usepackage{algorithm}
+\usepackage{mathtools}
+% \usepackage{algpseudocode}
+\usepackage{algorithmic}
+\usepackage[capitalize,noabbrev]{cleveref}
+\renewcommand{\algorithmicrequire}{\textbf{Input:}}
+% \newtheorem{lemma}{Lemma}
+% \newtheorem{remark}{Remark}
+% \newtheorem{theorem}{Theorem}
+
+\usepackage{tikz}
+\usepackage{graphicx}
+\usepackage{subcaption}
+\usepackage{multirow}
+
+% \usepackage{natbib}
+
+\newcommand{\fix}{\marginpar{FIX}}
+\newcommand{\new}{\marginpar{NEW}}
+
+
+
+
+
+
+
+
+
+
+\begin{document}
+
+\title{NAG-GS: Semi-Implicit, Accelerated and \mbox{Robust} Stochastic Optimizer}
+
+\author{%
+  Valentin Leplat \and Daniil Merkulov \and Aleksandr Katrutsa \and Daniel Bershatsky \and  Olga Tsymboi \and Ivan Oseledets
+}
+
+\institute{Valentin Leplat, Corresponding author \at
+             Innopolis University \\
+               Innopolis, Russia\\
+               v.leplat@innopolis.ru
+\and 
+Daniil Merkulov \at
+Skoltech, Moscow Institute of Physics and Technology\\
+Moscow, Russia
+\and
+Aleksandr Katrutsa \at
+Skoltech, AIRI \\
+Moscow, Russia
+\and
+Daniel Bershatsky \at
+Skoltech\\
+Moscow, Russia
+\and 
+Olga Tsymboi \at
+Moscow Institute of Physics and Technology, Sber AI Lab \\
+Moscow, Russia 
+\and
+Ivan Oseledets \at
+AIRI, Skoltech\\
+Moscow, Russia
+}
+
+\date{Received: date / Accepted: date}
+
+\maketitle
+
+\input{abstract}
+
+\keywords{accelerated gradient method \and Gauss-Seidel discretization \and deep learning \and stochastic first-order method}
+\subclass{90C25 \and 90C15 \and 90C90}
+
+
+
+\color{black}
+\section{Introduction}\label{sec:intro}
+
+
+
+We consider the problem of minimizing a smooth objective function based on stochastic gradient information:
+\begin{equation} \label{eq:opt_problem}
+\min_{x \in \mathbb{R}^n} f(x),
+\end{equation}
+where access to \( f \) is limited to unbiased stochastic gradient estimates.
+The function \( f \) is assumed to be differentiable and \( L \)-smooth. While our theoretical analysis focuses on the strongly convex quadratic case, the proposed method is designed to operate in general smooth (and potentially nonconvex) settings.
+
+This formulation is central in modern machine learning and large-scale optimization, particularly in training deep neural networks and large-scale empirical risk minimization. In these applications, full gradients are often unavailable or expensive to compute, making stochastic optimization essential. As a result, the design of stochastic optimization algorithms must carefully balance: 
+\begin{itemize}
+    \item \textbf{Efficiency}: achieving rapid convergence under noise,
+    \item \textbf{Stability}: tolerating large learning rates and numerical inaccuracies,
+    \item \textbf{Acceleration}: leveraging momentum or curvature information to improve convergence.
+\end{itemize}
+
+Although momentum-based methods such as Nesterov’s acceleration are widely used, their behavior in the stochastic setting is not fully understood. In this work, we propose a new momentum method derived from a second-order stochastic differential equation (SDE) with damping, discretized using a semi-implicit Gauss-Seidel scheme. The resulting algorithm, called \emph{NAG-GS}, is simple, stable, and empirically robust.
+\color{blue}
+The remainder of this section reviews related work on acceleration, Ordinary Differential Equations (ODE)-inspired optimization methods, and stochastic algorithms.
+\color{black}
+
+
+\subsection{Related work}
+
+\paragraph{Acceleration and ODE discretization.}
+The perspective of interpreting optimization algorithms as discretizations of dynamical systems has become widely adopted in recent years~\cite{muehlebach2019dynamical,su2014differential,wilson2016lyapunov,shi2021understanding}. This approach builds an explicit link between the properties of continuous-time ODEs and the behavior of discrete-time methods. A wide range of algorithms, including gradient descent, Nesterov acceleration, mirror descent~\cite{krichene2015accelerated}, proximal algorithms~\cite{attouch2019fast}, and ADMM~\cite{franca2018admm}, have been studied through this lens.
+
+A key insight in this line of work is that the choice of discretization has a critical impact on algorithmic performance. 
+For instance, Shi et al.~\cite{shi2019acceleration} and Zhang et al.~\cite{zhang2018direct} analyzed optimal discretizations for various classes of ODEs, while Malladi et al.~\cite{malladi2022sdes} extended this reasoning to stochastic first-order methods. Our method continues in this tradition but employs a novel semi-implicit Gauss-Seidel discretization that improves stability and robustness in stochastic optimization.
+
+Laborde and Oberman~\cite{laborde2020lyapunov} further extended Lyapunov techniques to the stochastic setting by interpreting stochastic Nesterov-type updates as perturbations of second-order ODEs. Their convergence analysis is based on discrete energy decay using fixed step sizes. In contrast, our method is derived from a new Gauss-Seidel discretization of a damped SDE, and we analyze its stability using spectral techniques and dynamical parameters. Moreover, our method requires only a single auxiliary vector and scales well to large-scale machine learning tasks.
+
+
+\color{blue}
+\paragraph{Stochastic acceleration and AC-SA.}
+The AC-SA method of Lan~\cite{lan2012optimal} is an optimal first-order method for stochastic composite convex problems of the form
+\(F(x) = f(x) + h(x)\), where $f$ is smooth and $h$ is (possibly non-smooth) but simple.
+By setting $h \equiv 0$, AC-SA directly applies to smooth stochastic convex optimization and achieves the optimal complexity guarantees in this regime via carefully designed step-size schedules and weighted averaging of iterates.
+In contrast, our focus in this work is different: we derive NAG-GS as a semi-implicit Gauss--Seidel discretization of a second-order SDE, targeting general smooth objectives (including nonconvex ones) and practical large-scale settings in which composite structure may be unknown or unused.
+Algorithmically, NAG-GS uses a single gradient oracle call per iteration, no averaging, and only one auxiliary vector, which makes it particularly easy to integrate into standard deep-learning pipelines.
+A more detailed comparison to AC-SA is given in Section~\ref{sec:experiments} and in the discussion section.
+% \textcolor{red}{(tweak the last sentence once we see exactly what we managed to run with AC-SA)}
+\color{black}
+
+
+Luo and Chen~\cite{luo2021differential} derive accelerated first-order methods from high-order ODE solvers and provide convergence guarantees for convex and strongly convex objectives. 
+Their analysis is elegant but remains purely deterministic. 
+In contrast, we extend the NAG-GS method to the stochastic setting, and develop a detailed convergence and stability analysis in the case of quadratic objectives using tools from numerical analysis, such as spectral radius and $A$-stability.
+
+In the deterministic case, we provide a refined analysis for quadratic forms that yields optimal step sizes achieving the highest possible contraction rate. 
+Moreover, we show that NAG-GS, for some specific choice of hyperparameters, reduces to the Quasi-Monotone Method (QMM) of~\cite{wilson2016lyapunov} under constant damping, allowing us to derive an $\mathcal{O}(1/k)$ convergence rate for strongly convex but possibly non-smooth functions. 
+This connection bridges our stochastic algorithm with optimal deterministic schemes and establishes a solid theoretical foundation for further extensions.
+
+\paragraph{Empirical momentum methods.}
+Momentum-based optimizers such as SGD with momentum, Nesterov’s accelerated gradient, and Adam are widely used in deep learning due to their practical effectiveness. 
+However, their theoretical behavior in the stochastic regime remains only partially understood, particularly in terms of stability under large learning rates and the role of momentum in nonconvex settings. 
+While recent works such as~\cite{taylor2023optimal,zhou2020boosting} propose deterministic schemes with optimal convergence properties, they do not leverage continuous-time or SDE-based insights and are not directly applicable to stochastic optimization. 
+Our method is grounded in a principled stochastic differential equation framework, demonstrating both strong empirical performance and robustness across a wide range of learning rates {\color{blue} for large batch size setup}.
+
+
+
+\color{blue}
+
+\subsection{Contributions}
+
+We summarize our main contributions below:
+
+\begin{itemize}
+    \item We propose a novel optimization algorithm, \textbf{NAG-GS}, derived from a semi-implicit Gauss--Seidel discretization of a second-order stochastic differential equation with damping.
+
+    \item We analyze its convergence and numerical stability on strongly convex quadratic objectives, derive admissible step-size intervals, and show that for a suitable choice of parameters NAG-GS attains the classical accelerated linear convergence factor for first-order methods on quadratics.
+
+    \item By identifying NAG-GS (in the Euclidean setting and with constant damping) as a special case of the Quasi-Monotone Methods (QMM) of~\cite{JMLR:v22:20-195}, we obtain Lyapunov-based convergence guarantees for $\mu$-strongly convex (possibly non-smooth) objectives. In particular, under a standard stochastic oracle model with unbiased gradients and bounded second moments, NAG-GS enjoys an optimal-order $\mathcal{O}(1/k)$ convergence rate in expectation; detailed proofs are given in the Supplementary Material.
+
+    \item We validate the effectiveness of NAG-GS on both convex and nonconvex tasks, including training deep ResNet and Transformer architectures. The method supports significantly larger learning rates than existing optimizers while maintaining stability and accuracy.
+\end{itemize}
+
+
+
+\subsection{Organization of the paper}
+
+The remainder of the paper is structured as follows.
+Section~\ref{sec:prelim-a-stab} introduces the notation and theoretical preliminaries, and recalls background on $A$-stability for ODE solvers that we use throughout the paper.
+In Section~\ref{sec:model and theory}, we derive the NAG-GS algorithm by discretizing a second-order stochastic differential equation (SDE) using a semi-implicit Gauss--Seidel scheme and analyze its behavior in the quadratic case for both deterministic and stochastic settings. We also illustrate its behavior on a one-dimensional non-convex SDE (reported in the Supplementary Material due to the lack of theoretical guarantees in this regime).
+Section~\ref{sec:experiments} presents a comprehensive experimental evaluation of NAG-GS, from low-dimensional logistic regression to large-scale machine learning tasks including ResNet-20, VGG-11, and Vision Transformer training.
+Finally, Section~\ref{sec:conclusion} summarizes our findings and outlines directions for future work.
+
+
+
+\section{Preliminaries and A-stability}
+\label{sec:prelim-a-stab}
+
+\color{black}
+\subsection{Preliminaries}\label{subsec_Preli}
+
+We start here with some general considerations in the deterministic setting for obtaining accelerated Ordinary Differential Equations (ODE) that will be extended in the stochastic setting in Section \ref{subsec_AccSDE}. We consider iterative methods for solving the unconstrained minimization problem:
+\begin{equation}\label{init_optProb}
+\min_{x \in {\color{black}{\mathbb{R}^n}}} f(x),
+\end{equation}
+where $f: {\color{black}{\mathbb{R}^n}} \rightarrow \mathbb{R} \cup \{+\infty \}$ is a proper closed convex extended real-valued function. 
+In the following, for simplicity, we shall consider  a function $f$ smooth on the entire space. 
+We also suppose $\mathbb{R}^n$ is equipped with the canonical inner product $\langle x , y \rangle = \sum_{i=1}^n x_i y_i$ and the correspondingly induced norm $\|x\| = \sqrt{\langle x , x \rangle}$. 
+Finally, we will consider in this section the class of functions $\mathcal{S}^{1,1}_{L,\mu}$ which stands for the set of strongly convex functions of parameter $\mu > 0$ with Lipschitz-continuous gradients with constant $L > 0$. 
+For such class of functions, it is well-known that the global minimum exists and is unique~\cite{YNesterov2018}. 
+One well-known approach to deriving the Gradient Descent (GD) method is discretizing the gradient flow:
+\begin{equation}
+\label{GF}
+\dot{x}(t) = - \nabla f(x(t)), \quad t > 0.
+\end{equation}
+
+The simplest forward (explicit) Euler method with step size (also referred to as learning rate) $\alpha_k > 0$  leads to the GD method 
+\begin{equation*}
+    x_{k+1} \leftarrow  x_{k} - \alpha_k \nabla f(x_k).
+\end{equation*}
+In numerical analysis, it is widely recognized that this method is conditionally $A$-stable. 
+{\color{black}{It means that the convergence appears only for $\alpha_k \in \mathcal{I}$, where $\mathcal{I}$ denotes the interval of the positive half line. 
+More formal definition of the conditional $A$-stability is presented in Section~\ref{sec::a-stability-ode}.}}
+
+\color{blue}
+Moreover, when considering $f \in \mathcal{S}^{1,1}_{L,\mu}$ with $0 < \mu \leq L < \infty$, the utilization of a step size $\alpha_k = 1/L$ leads to a linear convergence rate.
+\color{black}
+It is important to highlight that the highest rate of convergence is attained when $\alpha_k = \frac{2}{\mu + L}$. In such a scenario, we have 
+\begin{equation}\label{eq:ratesforGD}
+    \| x_{k} - x^{\star} \|^2 \leq \left( \frac{Q_f - 1}{Q_f + 1} \right)^{2k} \|x_0 - x^{\star} \|^2,
+\end{equation}
+where $Q_f$ is defined as $Q_f=\frac{L}{\mu}$ and is commonly referred to as the condition number of a function~$f$~\cite{YNesterov2018}. Another approach that can be considered is the backward (implicit) Euler method, which is represented as:
+\begin{equation}\label{GF_backEM} 
+x_{k+1} \leftarrow x_{k} - \alpha_k \nabla f(x_{k+1}), 
+\end{equation}
+where learning rate $\alpha_k > 0$.
+This method is unconditionally $A$-stable.
+In a nutshell, $A$-stability in numerical ordinary differential equations characterizes a method’s performance in the asymptotic regime as time approaches infinity. 
+An unconditionally $A$-stable method is one where the {\color{black}{step size}} can be arbitrarily large, yet the global error of the method converges to zero. 
+We give more details about the notion in~\cref{add_a_stability}.
+Hereunder, we summarize the methodology proposed by \cite{luo2021differential} to come up with a general family of accelerated gradient flows by focusing on the following simple problem:
+\begin{equation}
+\label{quad_optProb}
+\min_{x \in \mathbb{R}^n} f (x) = \frac{1}{2} x^\top A x
+\end{equation}
+for which the gradient flow in~(\ref{GF}) reads as:
+\begin{equation}\label{GF_quad}
+\dot{x}(t) = - Ax(t), \quad t > 0,
+\end{equation}
+where $A \in \mathbb{R}^{n \times n}$ is  symmetric positive definite matrix ensuring that $f \in \mathcal{S}^{1,1}_{L,\mu}$ where~$\mu$ and~$L$ respectively correspond to the minimum and maximum eigenvalues of matrix $A$, which are real and positive by assumption. 
+Instead of directly resolving~(\ref{GF_quad}), authors of~\cite{luo2021differential} opted to address a general linear ODE system as follows:
+
+\color{blue}
+\begin{equation}\label{GF_quadturned}
+\dot{y}(t) = Gy(t), \quad t > 0.
+\end{equation}
+Here $G$ denotes a (possibly problem-dependent) matrix.
+
+
+\color{black}
+
+The central concept is to search for a system~(\ref{GF_quadturned}) with an asymmetric block matrix $G$ that transforms the spectrum of $A$ from the real line to the complex plane, reducing the condition number from $\kappa(A)=\frac{L}{\mu}$ to $\kappa(G)=O\left(\sqrt{\frac{L}{\mu}}\right)$.
+Subsequently, accelerated gradient methods can be constructed from $A$-stable methods to solve~(\ref{GF_quadturned}) with a significantly larger step size, improving the contraction rate from $O\left(\left( \frac{Q_f - 1}{Q_f + 1} \right)^{2k} \right)$ to $O\left(\left( \frac{\sqrt{Q_f} - 1}{\sqrt{Q_f} + 1} \right)^{2k} \right)$.
+Moreover, to handle the convex case $\mu = 0$, the authors in~\cite{luo2021differential} combine the transformation idea with a suitable time scaling technique.
+
+
+
+\color{blue}
+In this paper, we consider one transformation that relies on the embedding of $A$ into a $2 \times 2$ block matrix $G_{NAG}(t)$ with a rotation built in~\cite{luo2021differential}:
+\begin{equation}
+\label{Transfo}
+        G_{NAG}(t)
+        =
+        \begin{bmatrix}
+            -I & I \\
+            \dfrac{\mu}{\gamma(t)} I - \dfrac{1}{\gamma(t)} A  & \quad-\dfrac{\mu}{\gamma(t)} I
+        \end{bmatrix},
+\end{equation}
+where $\gamma(t)$ is a positive time-scaling factor that satisfies
+\begin{equation}
+\label{gamma_ODE}
+    \dot{\gamma}(t) = \mu - \gamma(t), \qquad \gamma(0)=\gamma_0 > 0.
+\end{equation}
+For notational simplicity, we often write $G_{NAG}$ and $\gamma$ instead of $G_{NAG}(t)$ and $\gamma(t)$; the dependence on time (or, in the discrete setting, on the iteration index $k$) always enters through the scalar damping parameter $\gamma$.
+
+{\color{blue}{Denote by $\Re(\lambda)$ and $\sigma(G)$ the real part of $\lambda$ and the spectrum of a matrix $G$, respectively.
+Then, given $A$ positive definite, we can easily show that for the considered transformation we have ${\color{blue}{\Re}}(\lambda) < 0$ for all $\lambda \in \sigma(G_{NAG}(t))$ and all $t \ge 0$.}} 
+Further, we denote by $\rho(G):=\underset{\lambda \in \sigma(G)}{\text{max}}|\lambda|$ the spectral radius of a matrix $G$. 
+Let us now consider the NAG block matrix $G_{NAG}(t)$ and let $y=(x,v)$. 
+The dynamical system given in~(\ref{GF_quadturned}) with $y(0)=y_0 \in \mathbb{R}^{2n}$ reads:
+\begin{equation}\label{NAG_systemODE}
+\begin{split}
+    \frac{dx}{dt} &= v - x, \\
+    \frac{dv}{dt} &= \frac{\mu}{\gamma(t)} (x - v) - \frac{1}{\gamma(t)} A x,
+\end{split} 
+\end{equation}
+with initial conditions $x(0) = x_0$ and $v(0) = v_0$.
+
+
+\color{black}
+
+
+
+Note that this linear ODE can be expressed as:
+\begin{equation}
+\label{NAG_secondODE}
+    \gamma \ddot{x} + (\gamma + \mu) \dot{x} + Ax = 0,
+\end{equation}
+where $Ax$ is therefore the gradient of $f$ w.r.t. $x$. 
+Thus, one could generalize this approach for any function $f \in \mathcal{S}^{1,1}_{L,\mu}$ by replacing $Ax$ by $\nabla f(x)$, respectively, within~(\ref{Transfo}),~(\ref{NAG_systemODE}) and~(\ref{NAG_secondODE}).
+Since the notion of $A$-stability is crucial for the derivation of the main result, we provide a brief intro to this notion in the next section and highlight the dependence of the feasible step size interval on the $A$-stability of the method.
+
+\subsection{Insights about the notion of $A$-stability}
+\label{add_a_stability}
+
+
+
+Before we recall the notion of $A$-stability of ODE solvers, note that this paper only considers ODEs with asymptotically stable solutions.
+In particular, let the Jacobian matrix of a function $f$ at $x(t)$ be $J_f(x(t))$, then we focus on ODE
+\begin{equation}\label{eq:genODE}
+    \dot{x}(t) 
+    \,=\,
+    f(t,x(t)), 
+    \quad x(0) \,=\, x_0,
+\end{equation}
+with $\Re(\lambda) < 0$ for $\lambda \in \sigma(J_f(x(t)))$, where $\Re$ denotes real part of a complex number.
+
+\paragraph{Illustrative toy example.}
+Consider an objective function $\Phi(x) \coloneqq \frac{1}{2}x^T A x$ with $A$ being symmetric positive definite such that:
+\[
+    0 
+    ~<~     \mu 
+    ~\coloneqq~      \lambda_{\text{min}}(A) 
+    ~\leq~ \lambda
+    ~\leq~ \lambda_{\text{max}}(A)
+    ~\eqqcolon~ L
+    ~\leq~  +\infty,
+    \quad \forall \lambda \in \sigma(A).
+\]
+In this example, the global minimum is achieved at $x^{\star}=0$ and $\nabla \Phi(x)=Ax$.
+
+\cref{eq:genODE} boils down to the linear ODE:
+\begin{equation}\label{eq:linearODEex}
+    \dot{x}(t) = -A x(t), \quad x(0)=x_0.
+\end{equation}
+Here $J_f=-A$, hence $\Re(\lambda) < 0$ for all $\lambda \in \sigma(J_f)$ and it is not hard to show that $\| x(t) \|_2 \rightarrow 0 $ as $t \rightarrow \infty$. 
+Note that $x^{\star}=0$ is an equilibrium solution of the dynamical system~(\ref{eq:linearODEex}).
+
+\subsubsection{$A$-Stability of ODE solver}
+\label{sec::a-stability-ode}
+
+Now we briefly recall the concept of $A$-stability for ODE solvers, which originates from the classical notion of stability based on eigenvalues having negative real parts, as introduced by Dahlquist~\cite{dahlquist1963special}. 
+
+To avoid the general and potentially lengthy discussion of $A$-stability for nonlinear ODEs of the form
+\[
+\dot{x}(t) = f(t, x(t)), \quad x(0) = x_0, \quad \text{with } \Re(\lambda) < 0 \text{ for all } \lambda \in \sigma(J_f),
+\]
+we consider instead the simplified case of a linear autonomous system:
+\begin{equation}
+\label{eq:linODE}
+    \dot{x}(t) = G x(t), 
+    \quad 
+    x(0) = x_0,
+    \quad \text{with } \Re(\lambda) < 0 \text{ for all } \lambda \in \sigma(G).
+\end{equation}
+
+A one-step numerical method $\phi$ for solving~\eqref{eq:linODE} with step size $\alpha > 0$ generates iterates of the form:
+\[
+x_{k+1} = E_{\phi}(G, \alpha)\, x_k,
+\]
+{\color{black}{where $E_{\phi}(G, \alpha) \in \mathbb{R}^{n \times n}$ is called the \emph{stability matrix} (also known as the \emph{iteration matrix}) associated with the method $\phi$, the step size $\alpha$, and the system matrix $G$. This matrix governs the spectral behavior of the numerical method and determines whether the iterates converge to zero.}}
+
+
+The numerical scheme $\phi$ is called absolute stable or $A$-stable if $\rho(E_{\phi}(G,\alpha)) < 1 $ (from which the asymptotic convergence $x_k \rightarrow 0$ follows).
+If $\rho(E_{\phi}(G,\alpha)) < 1 $ holds for all $\alpha  > 0$, then the scheme is called unconditionally $A$-stable, and if $\rho(E_{\phi}(G,\alpha)) < 1 $ holds for some $\alpha \in \mathcal{I}$, where $\mathcal{I}$ denotes an interval of the positive half line, then the scheme is conditionally $A$-stable.
+The following subsection considers two popular ODE solvers from the $A$-stability perspective.
+
+
+\subsubsection{Explicit and implicit Euler schemes}
+Here, we review the stability of the explicit and implicit Euler schemes for solving~(\ref{eq:linODE}). 
+The analytical solution for~(\ref{eq:linODE}) with a constant discretization step $\alpha$ generates the iterates:
+\[
+x_{k+1} = x_k + \int_{t_k}^{t_{k+1}}  G x(s) ds, \quad k=0,\dots,M-1 .
+\]
+For $G=-A$, the explicit Euler method approximates the integral by the area of a rectangle with width $\alpha$ and height $-Ax_k$. 
+This leads to the iterates $x_{k+1} = (I - \alpha A)x_k$ which corresponds to the GD scheme for minimizing $\Phi(x)=\frac{1}{2} x^T A x$. 
+The explicit Euler method is $A$-stable if the spectral radius of $I-\alpha A$ is strictly less than 1, i.e., if $\rho(I-\alpha A)=\max_{\lambda \in \sigma(I-\alpha A)} |\lambda| < 1$.
+We can easily show that $\rho(I-\alpha A)=\text{max}\left(|1-\alpha \mu|,|1-\alpha L| \right)$, where $\mu$ and $L$ respectively denote the smallest and largest eigenvalue of $A$.
+Therefore, the explicit Euler method is $A$-stable if $0 < \alpha < 2/L$. 
+Additionally, we can determine the optimal $\alpha$ that minimizes the spectral radius:
+$\min_{\alpha > 0} \rho(I-\alpha A)$, which gives $\alpha^\star = 2/(\mu + L)$, resulting in $\rho(I-\alpha^\star A)=(Q_f - 1)/(Q_f + 1)$. 
+Assuming $0 < \mu \leq L <\infty$, we have $0<\alpha^\star = 2/(\mu + L) < 2/L$.
+Hence, the explicit Euler method is \emph{conditionally} $A$-stable, and the norm convergence with a linear rate follows as in~(\ref{eq:ratesforGD}).
+
+On the other hand, the implicit Euler scheme approximates the integral by the area of a rectangle with a height of $-Ax_{k+1}$, leading to the iterates $x_{k+1} = (I + \alpha A)^{-1}x_k$. 
+The term $\rho(I+\alpha A)^{-1}$ can be expressed as $\text{max}\left(|\frac{1}{1+\alpha \mu}|,|\frac{1}{1+\alpha L}| \right)$.
+This implies that the stability condition $\rho(I+\alpha A)^{-1}<1$ holds true for all $\alpha > 0$, making the implicit Euler scheme \emph{unconditionally} $A$-stable. 
+Moreover, the implicit Euler method can achieve a faster convergence rate by time rescaling, as it is not limited by any constraints on the step size.
+This is equivalent to opting for a larger step size.
+
+At the same time, even for the quadratic objective function $\Phi(x) = \frac{1}{2}x^\top A x$, it is clear that the implicit Euler scheme is more computationally intensive since it requires solving a sequence of linear systems.
+Therefore, straightforward usage of this scheme in large-scale setups is challenging.
+To avoid this issue, we focus on semi-implicit schemes that combine the benefits of explicit and implicit Euler schemes.
+In particular, we consider Gauss-Seidel semi-implicit discretization of the accelerated system~(\ref{NAG_systemODE}) to derive the novel NAG-GS optimization method.
+Extension of the NAG-GS to the inexact gradient setup is obtained through perturbation of the right-hand side in~(\ref{NAG_systemODE})  with a continuous Ito martingale.
+This perturbation converts the deterministic system of ODEs to the system of accelerated Stochastic Differential Equations (SDEs), see~\cref{subsec:discretization}. 
+
+\section{Model and Theory}\label{sec:model and theory}
+
+
+
+\subsection{Accelerated Stochastic Gradient flow}
+\label{subsec_AccSDE}
+In section~\ref{subsec_Preli}, we have presented a family of accelerated Gradient flows obtained by an appropriate spectral transformation $G$ of the matrix $A$, see~(\ref{NAG_systemODE}). 
+{\color{black}{When generalizing from the quadratic to the general convex case, the term $Ax$ in~(\ref{NAG_systemODE}) is replaced by $\nabla f(x)$.}}
+
+% Within the context of training neural networks, function $f(x)$ corresponds to some loss function, and its gradient $\nabla f(x)$ is contaminated by noise due to a finite-sample gradient estimate. 
+% The study of accelerated Gradient flows is now adapted to include and model the effect of the noise; to achieve this, we consider the dynamics given in~(\ref{GF_quadturned}) perturbed by a general martingale process. 
+% This leads us to consider the following Accelerated Stochastic Gradient (ASG) flow:
+% \begin{equation}
+% \label{ASGF_ODEsys}
+%     \begin{split}
+%         &\frac{dx}{dt} = v - x, \\
+%         &\frac{dv}{dt} = \frac{\mu}{\gamma} (x - v) - \frac{1}{\gamma} A x + \frac{dZ}{dt},
+%     \end{split} 
+% \end{equation}
+% \textcolor{red}{Optional: would be more correct on a mathematical point of view to write these equations in differential form, since derivative of a stochastic process is not well defined. More precisely, the the difference quotient has a variance blowing up as $\Delta t$ becomes infinitesimal.}
+% which corresponds to an (Accelerated) system of SDEs, where $Z(t)$ is a continuous Itô martingale. 
+% We assume that $Z(t)$ has the simple expression $dZ=\sigma dW$, where $W=(W_1, \ldots, W_n)$ is a standard $n$-dimensional Brownian Motion. 
+% {\color{black}{In this paper, we consider only the case of constant parameter~$\sigma$, this parameter is sometimes referred to as the diffusion coefficient in SDE.}}
+
+\color{blue}
+Within the context of training neural networks, $f(x)$ denotes the loss and
+$\nabla f(x)$ is observed with noise due to finite-sample (mini-batch) estimates.
+To model the effect of this noise in accelerated gradient flows, we perturb the
+dynamics in~(\ref{GF_quadturned}) by a continuous Itô martingale. This leads to the
+following Accelerated Stochastic Gradient (ASG) flow, written in differential form:
+\begin{equation}
+\label{ASGF_ODEsys}
+\begin{aligned}
+    d x_t &= (v_t - x_t)\,dt,\\
+    d v_t &= \Big(\tfrac{\mu}{\gamma}(x_t - v_t) - \tfrac{1}{\gamma} A x_t\Big)\,dt \;+\; dZ_t,
+\end{aligned}
+\end{equation}
+where $(Z_t)_{t\ge 0}$ is a continuous Itô martingale. In this paper we take
+\[
+    dZ_t = \sigma\, dW_t,
+\]
+with $W_t=(W_t^{(1)},\ldots,W_t^{(n)})$ a standard $n$-dimensional Brownian motion.
+For simplicity, $\sigma>0$ is a constant (the diffusion coefficient); more general
+matrix-valued diffusions $\Sigma\,dW_t$ are possible but not considered here.
+
+\medskip
+\noindent\textit{Remark (on notation).} It is mathematically more precise to use the
+stochastic differential form above rather than writing derivatives like $dZ_t/dt$,
+since Brownian paths are almost surely nowhere differentiable. In particular,
+for Brownian increments $W_{t+\Delta t}-W_t\sim\mathcal N(0,\Delta t)$ we have
+\[
+    \operatorname{Var}\!\left(\frac{W_{t+\Delta t}-W_t}{\Delta t}\right)=\frac{1}{\Delta t}\;\to\;\infty
+    \quad(\Delta t\to 0),
+\]
+so $dW_t/dt$ does not exist as an $L^2$ random variable.
+
+\color{black}
+
+
+{\color{black}{For the sake of completeness, let us recall the definition of a Brownian motion:}
+\begin{definition}[Brownian Motion]
+A standard $n$-dimensional Brownian motion $W = (W_t)_{t \geq 0}$ is a stochastic process with the following properties:
+\begin{itemize}
+    \item $W_0 = 0$ almost surely,
+    \item The paths $t \mapsto W_t$ are almost surely continuous,
+    \item The process has independent increments: for any $0 \leq t_0 < t_1 < \dots < t_k$, the random variables $W_{t_1} - W_{t_0}, \dots, W_{t_k} - W_{t_{k-1}}$ are independent,
+    \item The process has Gaussian increments: for any $s < t$, the increment $W_t - W_s$ is normally distributed with mean zero and covariance $(t - s) I_n$, i.e., $W_t - W_s \sim \mathcal{N}(0, (t-s)I_n)$.
+\end{itemize}
+Brownian motion is also referred to as a Wiener process, and it is the canonical model of continuous stochastic noise used in stochastic differential equations.
+\end{definition}}
+
+\color{blue}
+\begin{remark}[Connection to mini-batch stochastic gradients]
+In practical stochastic optimization, the noise in the gradient typically arises from sampling a mini-batch of training examples.
+If we denote by $g(x,\xi)$ the gradient of the loss with respect to a random data point~$\xi$, then a mini-batch gradient estimate takes the form
+\[
+    \nabla \tilde{f}(x) = \frac{1}{b} \sum_{i=1}^b g(x,\xi_i)
+    = \nabla f(x) + \varepsilon,
+\]
+where $\varepsilon$ is a mean-zero random perturbation whose covariance decreases as the batch size $b$ increases.
+Under mild assumptions (e.g., finite variance and weak dependence), the central limit theorem suggests that, after appropriate rescaling, the cumulative effect of such noise over many steps can be approximated by a Gaussian process.
+This is the usual diffusion approximation, which motivates the Brownian noise term $\sigma\, dW_t$ in~(\ref{ASGF_ODEsys}).
+More general noise models could be considered (e.g., state-dependent covariance or heavy-tailed noise), but we restrict ourselves here to the additive Gaussian setting in order to keep the analysis tractable.
+\end{remark}
+
+\color{black}
+
+
+The next section presents the discretizations corresponding to the ASG flow given in~(\ref{ASGF_ODEsys}).
+
+\subsection{Discretization: Gauss-Seidel Splitting and Semi-Implicitness}
+\label{subsec:discretization}
+
+This section presents the primary strategy to discretize the Accelerated SDE's system~(\ref{ASGF_ODEsys}). 
+The motivation behind the discretization method is to derive integration schemes that are, in the best case, unconditionally $A$-stable or conditionally $A$-stable with the highest possible integration step. 
+In the classical terminology of (discrete) optimization methods, this value ensures convergence of the obtained methods with the largest possible step size. 
+Consequently, it improves the contraction rate (or the rate of convergence). 
+In Section~\ref{subsec_Preli}, we have briefly recalled that the most well-known unconditionally $A$-stable scheme is the backward Euler method~(\ref{GF_backEM}), which is an implicit method and hence can achieve a faster convergence rate. 
+However, this requires solving a linear system or, in the case of a general convex function, computing the root of a non-linear equation, leading to a high computational cost. 
+This is why few implicit schemes are used to solve high-dimensional optimization problems. 
+Still, an explicit scheme closer to the implicit Euler method is expected to have good stability with a larger step size than a forward Euler method.
+Furthermore, assuming a Gaussian noise process, it is crucial to propose a solver capable of handling a wide range of step size values. 
+Specifically, allowing for a larger ratio $\alpha / b$, where $b$ denotes the mini-batch size, increases the likelihood of converging to wider local minima, ultimately enhancing the generalization performance of the trained model~\cite{keskar2017largebatch}.
+More discussion of this aspect is presented in Supplementary materials.
+
+Motivated by the Gauss-Seidel (GS) method for solving linear systems, we consider the matrix splitting $G=M+N$ with $M$ being the lower triangular part of $G$  and $N=G-M$, we propose the following Gauss-Seidel splitting scheme for~(\ref{GF_quadturned}) perturbed with noise:
+\begin{equation}\label{NAG_GS_splitting_Stocha}
+    \frac{y_{k+1}-y_{k}}{\alpha_k}=My_{k+1}+Ny_k + \begin{bmatrix} 0 \\ \sigma \frac{W_{k+1}-W_k}{\alpha_k} \end{bmatrix}   
+\end{equation}
+which for $G=G_{NAG}$ (see~(\ref{Transfo})), gives the following semi-implicit scheme with step size $\alpha_k > 0$:
+{\small
+\begin{equation}
+\label{NAG_GS_scheme}
+    \begin{split}
+        &\frac{x_{k+1}-x_k}{\alpha_k} = v_k - x_{k+1}, \\
+        &\frac{v_{k+1}-v_k}{\alpha_k} = \frac{\mu}{\gamma_k} (x_{k+1} - v_{k+1}) - \frac{1}{\gamma_k} A x_{k+1} + \sigma \frac{W_{k+1}-W_k}{\alpha_k}.
+    \end{split} 
+\end{equation}
+}
+Note that due to the properties of Brownian motion, we can simulate its values at the selected points by:
+$W_{k+1}=W_{k}+\Delta W_k$, where $\Delta W_k$ are independent random variables with distribution $\mathcal{N}(0,\alpha_k)$. 
+ 
+Furthermore, ODE~(\ref{gamma_ODE}) corresponding to the parameter $\gamma$ is also discretized implicitly:
+\begin{equation}
+    \frac{\gamma_{k+1}-\gamma_k}{\alpha_k}=\mu - \gamma_{k+1}, \quad \gamma_0 >0.
+\end{equation}
+As already mentioned earlier, heuristically, for general $f \in \mathcal{S}^{1,1}_{L,\mu}$ with $\mu \geq 0$, we just replace $Ax$ in~(\ref{NAG_GS_scheme}) with $\nabla f (x)$ and obtain the following NAG-GS scheme:
+\begin{equation}
+\label{Gen_NAG_GS_scheme}
+    \begin{split}
+        \frac{x_{k+1}-x_k}{\alpha_k} &= v_k - x_{k+1}, \\
+        \frac{v_{k+1}-v_k}{\alpha_k} &= \frac{\mu}{\gamma_k} (x_{k+1} - v_{k+1}) - \frac{1}{\gamma_k} \nabla f (x_{k+1}) + \sigma \frac{W_{k+1}-W_k}{\alpha_k}.
+    \end{split} 
+\end{equation}
+\color{blue}
+In practice we adopt the following semi-implicit strategy: during the update of $(x_{k+1}, v_{k+1})$ we keep the damping parameter frozen at the current value $\gamma_k$, and only after updating $(x_{k+1}, v_{k+1})$ we update $\gamma$ to $\gamma_{k+1}$ using the implicit Euler step above.
+Solving the scalar equation
+\[
+    \frac{\gamma_{k+1}-\gamma_k}{\alpha_k} = \mu - \gamma_{k+1}
+\]
+gives
+\[
+    \gamma_{k+1} = \frac{\gamma_k + \alpha_k \mu}{1 + \alpha_k}
+    \;=\;
+    (1 - a_k)\,\gamma_k + a_k \mu,
+    \quad
+    a_k \coloneqq \frac{\alpha_k}{1 + \alpha_k}.
+\]
+This explains why $\gamma_k$ appears in the discrete update~(\ref{NAG_GS_scheme}) and~(\ref{Gen_NAG_GS_scheme}), while $\gamma_{k+1}$ is only used at the next iteration.
+
+\color{black}
+
+
+Finally, we introduce the NAG-GS method (see~\cref{alg:nag_gsgeneral}). 
+In this method, we consider the presence of unknown noise when computing the gradient $\nabla f(x_{k+1})$. 
+We denote this noisy gradient as $\nabla \tilde{f}(x_{k+1})$ in~\cref{alg:nag_gsgeneral}. 
+Notably, to achieve strict equivalence with the scheme described in~(\ref{Gen_NAG_GS_scheme}), we have the relationship $\nabla \tilde{f}(x_{k+1}) = \nabla f(x_{k+1}) + \sigma \mu (1 - \frac{1}{b_k}) (W_{k+1} - W_k)$, where $b_k$ is defined as $b_k:=\alpha_k \mu (\alpha_k \mu + \gamma_{\textcolor{black}{k} })^{-1}$. \color{blue} If $\mu=0$, we define $\mu^{-1}b_k \coloneqq \alpha_k/(\alpha_k\mu+\gamma_k) =\alpha_k/\gamma_k$ (continuous extension), so the update remains well-defined.
+\color{black}
+
+
+
+\color{blue}
+\begin{algorithm}
+    \caption{Nesterov Accelerated Gradients with Gauss–Seidel splitting (NAG-GS).}\label{alg:nag_gsgeneral}
+    \begin{algorithmic}
+    \REQUIRE Choose $x_0 \in \mathbb{R}^n$, parameters $\mu \geq 0$, $\gamma_0 > 0$.
+    \STATE Set $v_0 := x_0$.
+    \FOR{$k = 0, 1, 2, \ldots$}
+        \STATE Choose step size $\alpha_k > 0$.
+        \STATE $\triangleright$ Update parameters and state $x$:
+        \STATE Set $a_k := \alpha_k / (1 + \alpha_k)$.
+        \STATE Set $x_{k+1} := (1 - a_k)\, x_k + a_k \, v_k$.
+        \STATE $\triangleright$ Update state $v$ using current damping $\gamma_k$:
+        \STATE Set $b_k := \alpha_k \mu \, (\alpha_k \mu + \gamma_k)^{-1}$.
+        \STATE Set $v_{k+1} := (1 - b_k)\, v_k + b_k \, x_{k+1} - \mu^{-1} b_k \, \nabla \tilde{f}(x_{k+1})$.
+        \STATE $\triangleright$ Update damping parameter $\gamma$ (implicit Euler step):
+        \STATE Set $\gamma_{k+1} := (1 - a_k)\, \gamma_k + a_k \mu$.
+    \ENDFOR
+    \end{algorithmic}
+\end{algorithm}
+\color{black}
+
+
+
+
+
+\color{blue}
+\begin{remark}[Memory footprint of NAG-GS vs. AdamW] 
+According to~\cref{alg:nag_gsgeneral}, the NAG-GS algorithm requires one auxiliary vector with a dimension equal to the number of trained parameters.
+In contrast, AdamW maintains and updates two such auxiliary vectors (first and second moments).
+Thus, NAG-GS has a smaller memory footprint than AdamW, while the dominant per-iteration computational cost in both methods remains the evaluation of the stochastic gradient and a handful of vector operations.
+This can be advantageous in memory-constrained regimes (e.g., very large models or devices with limited GPU memory).
+\end{remark}
+
+\color{black}
+
+
+Moreover, the step size update can be performed using different strategies. 
+For instance, one may choose the method proposed in~\cite[Method~2.2.7]{YNesterov2018} which specifies to compute $\alpha_k \in (0,1)$ such that $L \alpha_{k}^2 = (1-\alpha_k) \gamma_k + \alpha_k \mu$. Note that for $\gamma_0 = \mu$, hence the sequences $\gamma_k = \mu$ and $\alpha_k = \sqrt{\frac{\mu}{L}}$ for all $k \geq 0$.
+In~\cref{subsec_convergenceanalysis}, we discuss how to compute the step size for Algorithm~\ref{alg:nag_gsgeneral}.
+
+
+Finally, we have also considered full-implicit discretizations.
+However, interest in such methods is limited to ML applications since the obtained implicit schemes use second-order information about~$f$, and such schemes are typically intractable for real-life ML models.
+Therefore, we analyze full-implicit discretizations in the Supplementary materials {\color{black}{(Section~3)}}.
+
+
+\subsection{Convergence analysis of quadratic case}\label{subsec_convergenceanalysis}
+We now study how to select a maximal step size that ensures convergence and yields an optimal contraction rate for the NAG-GS method when applied to the stochastic system~(\ref{ASGF_ODEsys}). 
+In this section we focus on the quadratic objective
+\[
+    f(x) = \frac{1}{2} x^\top A x,
+\]
+with eigenvalues
+\(
+0 < \mu = \lambda_1 \le \dots \le \lambda_n = L < \infty,
+\)
+and we analyze how the parameters \(\mu\), \(L\), and \(\gamma\) influence the stability and contraction of the method.
+The two main quantities we study are the spectral radius of the iteration matrix and the covariance matrix at stationarity associated with the NAG-GS iteration from Algorithm~\ref{alg:nag_gsgeneral}.
+The detailed proofs are deferred to the Supplementary Material.
+
+\begin{theorem}
+    \label{Theo2}
+    Let \(G_{NAG}\) be defined as in~(\ref{Transfo}) and assume that \(\gamma \geq \mu\) and
+    \(
+    0 < \mu = \lambda_1 \leq \ldots \leq \lambda_n = L < \infty.
+    \)
+    If the step size satisfies
+    \[
+        0 < \alpha \;\leq\; \frac{\mu+\gamma + \sqrt{(\mu - \gamma)^2 + 4\gamma L}}{L - \mu},
+    \]
+    then the NAG-GS method summarized in Algorithm~\ref{alg:nag_gsgeneral} is convergent for the \(n\)-dimensional quadratic problem with \(n \color{blue}\geq\color{black} 2\).
+\end{theorem}
+
+The proof proceeds in three steps. 
+First, we derive the iteration matrix corresponding to NAG-GS in each eigendirection of \(A\) and analyze its spectral radius and stationary covariance in the two-dimensional case \(n=2\) as a function of \(\mu\), \(L\), \(\gamma\), \(\sigma\), and \(\alpha\).
+Second, we show how to choose the step size \(\alpha\) that optimizes the contraction rate while remaining within the admissible stability interval.
+Finally, we extend the scalar analysis to higher dimensions via the spectral decomposition of \(A\) and obtain Theorem~\ref{Theo2}.
+Illustrative numerical simulations confirming the theoretical predictions are provided in the Supplementary Material.
+
+\color{blue}
+\begin{remark}[Optimal contraction rate and comparison with gradient descent]
+    \label{rem:optimal-rate-quadratic}
+    Consider the deterministic case \(\sigma = 0\) and the strongly convex quadratic objective
+    \(
+        f(x) = \tfrac{1}{2} x^\top A x
+    \)
+    with eigenvalues
+    \(
+    0 < \mu = \lambda_{\min}(A) \le \lambda \le \lambda_{\max}(A) = L < \infty.
+    \)
+    Let \(\kappa \coloneqq L / \mu\) denote the condition number.
+    Fix the damping parameter to be constant and equal to the strong convexity modulus,
+    \(
+        \gamma_k \equiv \gamma = \mu,
+    \)
+    and consider a constant step size \(\alpha > 0\).
+
+    For each eigenvalue \(\lambda \in [\mu,L]\), the NAG-GS iteration restricted to the corresponding two-dimensional subspace
+    \(
+        \operatorname{span}\{x, v\}
+    \)
+    can be written as
+    \(
+        z_{k+1} = T(\lambda)\, z_k
+    \),
+    where \(z_k = (x_k, v_k)\) and \(T(\lambda)\) is a \(2 \times 2\) iteration matrix that depends on \(\alpha\), \(\mu\), \(\gamma\), and \(\lambda\) (see Supplementary Material\footnote{Section 4 "Spectral analysis of deterministic NAG-GS on quadratic objectives".} for the explicit expression).
+    A straightforward calculation shows that, when \(\gamma = \mu\),
+    \[
+        \det T(\lambda) 
+        \;=\; \frac{\mu}{(1 + \alpha)(\alpha \mu + \mu)},
+    \]
+    which is independent of \(\lambda\).
+
+    Moreover, for the most ill-conditioned direction \(\lambda = \mu\), the matrix \(T(\mu)\) becomes upper triangular and both of its eigenvalues are equal to
+
+    \begin{equation}\label{eq:opti_rho}
+        \rho_\mu(\alpha) 
+        \;=\; \frac{1}{1 + \alpha}.
+    \end{equation}
+    One can further show that for all \(\lambda \in [\mu,L]\) and all admissible \(\alpha\) in Theorem~\ref{Theo2}, the eigenvalues of \(T(\lambda)\) have modulus at most \(\rho_\mu(\alpha)\), and the worst-case contraction occurs indeed at \(\lambda = \mu\).
+    Hence, the NAG-GS method enjoys a linear convergence rate in the quadratic strongly convex case with contraction factor \(\rho_\mu(\alpha)\).
+
+    \begin{remark}
+        Note that the same conclusion for the expression of $\rho_\mu(\alpha) $ given in~(\ref{eq:opti_rho}) can be derived from the discussion related to the special radius analysis of NAG-GS for the case $\gamma= \mu$, see Supplementary Material Section 2.1. 
+    \end{remark}
+
+    The optimal step size \(\alpha^\star\) maximizing the admissible interval in Theorem~\ref{Theo2} for \(\gamma = \mu\) is given by
+    \[
+        \alpha^\star 
+        \;=\;
+        \frac{2\mu + 2\sqrt{\mu L}}{L - \mu}.
+    \]
+    Substituting this into \(\rho_\mu(\alpha)\) yields the optimal contraction factor
+    \[
+        \rho_{\text{NAG-GS}}
+        \;\coloneqq\;
+        \rho_\mu(\alpha^\star)
+        \;=\;
+        \frac{1}{1 + \alpha^\star}
+        \;=\;
+        \frac{\sqrt{L} - \sqrt{\mu}}{\sqrt{L} + \sqrt{\mu}}
+        \;=\;
+        \frac{\sqrt{\kappa} - 1}{\sqrt{\kappa} + 1}.
+    \]
+    For comparison, gradient descent applied to the same quadratic function with its optimal constant step size 
+    \(
+        \alpha_{\mathrm{GD}}^\star = \tfrac{2}{\mu + L}
+    \)
+    has worst-case contraction factor
+    \[
+        \rho_{\mathrm{GD}}
+        \;=\;
+        \frac{L - \mu}{L + \mu}
+        \;=\;
+        \frac{\kappa - 1}{\kappa + 1}.
+    \]
+    Since \(\kappa > 1\) implies
+    \[
+        0 < 
+        \frac{\sqrt{\kappa} - 1}{\sqrt{\kappa} + 1}
+        \;=\;
+        \rho_{\text{NAG-GS}}
+        \;<\;
+        \rho_{\mathrm{GD}}
+        \;=\;
+        \frac{\kappa - 1}{\kappa + 1}
+        \;<\; 1,
+    \]
+    NAG-GS achieves a strictly smaller worst-case contraction factor than gradient descent on strongly convex quadratic objectives with the same condition number.
+    In other words, NAG-GS accelerates gradient descent on this model class and recovers the classical accelerated factor \((\sqrt{\kappa}-1)/(\sqrt{\kappa}+1)\) for first-order methods on quadratic problems~\cite{YNesterov2018}.
+    %The derivation of the matrix \(T(\lambda)\) and the above expression for \(\rho_{\text{NAG-GS}}\) are provided in the Supplementary Material.
+\end{remark}
+
+
+
+\subsection{Convergence analysis for strongly convex functions}\label{subsec_stronglyCovex}
+
+\subsubsection{The deterministic setting}
+
+
+When NAG-GS is applied using exact first-order information (i.e., gradients or subgradients), we refer to this as the deterministic setting.
+The method was originally proposed from an ODE and semi-implicit discretization viewpoint, and, to the best of our knowledge, its convergence properties had not previously been discussed explicitly in this language.
+However, in the Euclidean setting NAG-GS can be identified as a special case of the \emph{Quasi-Monotone Methods} (QMM) introduced in~\cite{JMLR:v22:20-195}.
+The convergence guarantees established there for QMM therefore apply directly to NAG-GS; our contribution is to make this equivalence explicit and to interpret it through the lens of accelerated ODEs and Gauss--Seidel discretization.
+
+In~\cite{JMLR:v22:20-195}, the authors develop a unifying Lyapunov framework for the non-asymptotic analysis of momentum-based optimization algorithms and show that Nesterov's estimate sequences are equivalent to a particular class of Lyapunov functions, both in continuous and discrete time.
+They introduce the QMM family, whose iterates (for unit time step \(\delta\)) are given by
+\[
+\boxed{
+\begin{aligned}
+x_{k+1} &= \frac{\tau_k}{1 + \tau_k} v_k + \frac{1}{1+\tau_k} x_k, \\
+\nabla h(v_{k+1}) - \nabla h(v_k) &= \tau_k \left( \nabla h(x_{k+1}) - \nabla h(v_{k+1}) - \frac{1}{\mu} g_{k+1} \right),
+\end{aligned}
+}
+\]
+where \(g_{k+1}\) denotes a first-order oracle at \(x_{k+1}\) (in the differentiable case, \(g_{k+1} = \nabla f(x_{k+1})\); more generally, one may take any subgradient \(g_{k+1} \in \partial f(x_{k+1})\)) and \(\{\tau_k\}_{k \ge 0}\) is a suitable sequence of positive parameters.
+
+In the Euclidean case \(h(x) = \tfrac{1}{2} \|x\|^2\), we have \(\nabla h(x) = x\).
+Identifying \(\alpha_k = \tau_k\) and fixing the NAG-GS parameter \(\gamma_0 = \mu\) so that \(\gamma_k = \mu\) for all \(k \geq 0\), the QMM and NAG-GS iterates become algebraically equivalent.
+To the best of our knowledge, this equivalence is not explicitly noted in the Lyapunov or ODE-based literature such as~\cite{luo2021differential}.
+
+Furthermore, \cite{JMLR:v22:20-195} introduce the discrete-time Lyapunov function
+\begin{equation}\label{eq:qmm-lyapunov-def}
+    E_k = A_k\left( f(x_k) - f(x^\star) + \mu\, D_h(x^\star, v_k) \right),
+\end{equation}
+and, under the assumption that \(f\) is \(\mu\)-strongly convex with respect to \(h\) and that \(h\) is \(\eta\)-strongly convex, they prove the bound (their Eq.~(34))
+\[
+E_{k+1} - E_k \;\leq\; \frac{A_k \tau_k^2}{2 \mu \eta} \,\bigl\| g_{k+1} \bigr\|^2.
+\]
+By choosing the discrete-time sequence \( A_k = \frac{(k+2)(k+3)}{6} \) and step parameter \( \tau_k = \frac{2}{k + 2} \), which satisfy the consistency condition \( \frac{A_{k+1} - A_k}{A_k} = \tau_k \), and assuming that the oracle is uniformly bounded, i.e.,
+\[
+\|g_k\| \;\leq\; G \quad \text{for all } k \ge 0
+\]
+(for instance, this holds if \(f\) is Lipschitz on the level set containing the iterates), one obtains the convergence rate
+\[
+f(x_k) - f(x^\star) \;\leq\; \mathcal{O}\!\left( \frac{1}{k} \right).
+\]
+
+This rate is not optimal for smooth, strongly convex functions with Lipschitz-continuous gradients (where accelerated methods can achieve linear convergence), but it is known to be optimal for nonsmooth, strongly convex optimization using first-order (subgradient-type) methods.
+Importantly, the QMM analysis does not require differentiability of \(f\) nor a Lipschitz-continuous gradient: a bounded (sub)gradient assumption suffices.
+This further illustrates the robustness of QMM and, by extension, of NAG-GS, and shows that NAG-GS can serve as a robust optimizer even for general (possibly nonsmooth) strongly convex functions.
+
+
+\subsubsection{Extension to the stochastic setting}
+%\textcolor{red}{Big goal to achieve before deadline: }
+
+The same Lyapunov framework also extends to a stochastic oracle model.
+Assume that each iteration we have access to an unbiased stochastic (sub)gradient $g_{k+1}$ with bounded second moment, i.e.,
+$\mathbb{E}[g_{k+1} \mid x_{k+1}] \in \partial f(x_{k+1})$ and $\mathbb{E}\| g_{k+1}\|^2 \le G^2$ for some $G \ge 0$.
+Using the QMM Lyapunov function $E_k$ in~(\ref{eq:qmm-lyapunov-def}) and working in expectation, we show in Theorem~5.1 of the Supplementary material that the QMM (and hence NAG-GS, via the Euclidean equivalence) iterates satisfy
+\[
+\mathbb{E}\big[ f(x_k) - f(x^\star)\big] = \mathcal{O} \left( \frac{1}{k} \right)
+\]
+for $\mu$-strongly convex, possibly non-smooth objectives.
+This $\mathcal{O}(1/k)$ rate is the classical optimal order for first-order methods in the non-smooth strongly convex regime.
+Thus, NAG-GS inherits from QMM not only a robust deterministic Lyapunov analysis, but also an optimal-order convergence guarantee under standard stochastic oracle.
+
+
+\begin{remark}[On the term ``accelerated'']
+\label{rem:accelerated-term}
+We refer to NAG-GS as an accelerated method in two complementary senses.
+
+First, in the deterministic strongly convex quadratic setting, Remark~\ref{rem:optimal-rate-quadratic} shows that NAG-GS attains the classical accelerated contraction factor
+\[
+    \frac{\sqrt{\kappa}-1}{\sqrt{\kappa}+1},
+    \qquad
+    \kappa \coloneqq \frac{L}{\mu},
+\]
+which improves over the factor $(\kappa-1)/(\kappa+1)$ of gradient descent and can be interpreted as reducing the effective condition number from $\kappa$ to $\sqrt{\kappa}$.
+
+Second, via the equivalence with the Quasi-Monotone Methods (QMM) framework~\cite{JMLR:v22:20-195}, NAG-GS enjoys an $\mathcal{O}(1/k)$ rate in function value for $\mu$-strongly convex, possibly nonsmooth objectives, both in the deterministic and stochastic oracle settings. This matches the classical optimal order for first-order (subgradient-type) methods in the nonsmooth strongly convex regime.
+
+We do not claim that NAG-GS recovers the $\mathcal{O}(1/k^2)$ complexity of deterministic accelerated gradient methods on general smooth convex problems, nor do we provide global linear convergence guarantees for all smooth strongly convex objectives beyond the quadratic case. In the stochastic convex and strongly convex settings we only establish the above sublinear $\mathcal{O}(1/k)$ rates, and in the nonconvex regime we report empirical performance without formal complexity bounds. In these broader settings, ``accelerated'' should therefore be understood in the dynamical-systems sense: NAG-GS arises as a Gauss--Seidel discretization of an accelerated second-order ODE and empirically exhibits momentum-like fast transients and robustness to large step sizes, rather than offering universal Nesterov-type optimal complexity guarantees.
+\end{remark}
+
+
+
+\color{black}
+
+\section{Experiments}
+\label{sec:experiments}
+
+We test the NAG-GS method on several neural architectures: logistic regression, transformer model for natural language processing (RoBERTa model) and computer vision (ViT model) tasks, and residual networks for computer vision tasks (ResNet20). 
+To ensure a fair benchmark of our method across these neural architectures, we replace only the optimizer with NAG-GS while keeping all other hyperparameters fixed. 
+Our experiments can be reproduced using the source code\footnote{\url{https://github.com/naggsopt/naggs}}.
+
+\subsection{Toy problem}
+\label{sec:exp-toy-problem}
+
+We compare the convergence of the NAG-GS method with other first-order methods, including standard accelerated methods like Heavy Ball (HB) method, Accelerated Gradient Descent (AGD), and {\color{blue}Accelerated Stochastic Approximation (AC-SA) method~\cite{lan2012optimal}}.
+We select these methods since they establish an optimal convergence rate for the considered type of problems. 
+This test demonstrates that NAG-GS can work with larger learning rates. 
+If a large learning rate is used, NAG-GS converges faster than competitors with smaller learning rates.
+
+\paragraph{Strongly convex quadratic function.}
+Consider the problem $\min_x f(x)$, where $f(x) = \frac12 x^\top Ax - b^\top x$ is convex quadratic function.
+The matrix $A \in \mathbb{S}^n_{++}$ is symmetric and positive definite, $L = \lambda_{\max}(A)$, $\mu = \lambda_{\min}(A)$ and $n=100$.
+We assume that method converges if $f(x_k) - f^* \leq 10^{-4}$, where $f^* = f(x^*)$ is the optimum function value.
+If some learning rate leads to divergence, we set the number of iterations to~$10^{10}$.
+In this experiment, we use the accelerated gradient descent (AGD) version from~\cite{su2014differential}.
+In NAG-GS we use constant $\gamma = \mu = \lambda_{\min}(A)$.
+In the HB method, we use $\beta = 0.9$.
+{\color{blue}In the AC-SA method, we vary the parameter $\gamma$ in the equation~(30) from~\cite{lan2012optimal} since it is a proxy of learning rate used by other methods.}
+Also, we test~70 learning rates distributed uniformly in the logarithmic grid in the interval $[10^{-3}, 10]$.
+Figure~\ref{fig::quadratic_lr_compare} shows the dependence of the number of iterations needed for convergence of NAG-GS, gradient descent (GD), accelerated gradient descent (AGD) {\color{blue}and AC-SA method} on the learning rates for different $\mu$ and $L$.
+We observe that NAG-GS provides two benefits.
+First, it converges for larger learning rates than the GD, AGD, HB {\color{blue} and AC-SA methods}. 
+Second, in the large learning rate regime, NAG-GS converges faster in terms of the number of iterations than GD and AGD.
+Although the AGD method is optimal among first-order methods, its feasible learning rate is strictly bounded by~$1/L$.
+{\color{blue} We note that the AC-SA method behaves similarly to the AGD method in the considered toy problems.}
+In contrast, the non-asymptotic convergence of the NAG-GS method remains a subject of future work. 
+However, NAG-GS with a large learning rate, which is infeasible for the AGD {\color{blue} and AC-SA methods}, shows faster convergence even for the ill-conditioned problem, as shown in Figure~\ref{fig::illconditioned_quad}.
+
+\begin{figure}[!ht]
+    \centering
+    \begin{subfigure}{0.45\linewidth}
+        \includegraphics[width=\linewidth]{fig/quad_step_sizes_kappa10.pdf}
+        \caption{$\mu = 1$, $L = 10$}
+    \end{subfigure}
+    ~
+    \begin{subfigure}{0.45\linewidth}
+    \includegraphics[width=\linewidth]{fig/quad_step_sizes_kappa1000.pdf}
+    \caption{$\mu = 10^{-1}$, $L = 100$}
+    \label{fig::illconditioned_quad}
+    \end{subfigure}
+    \caption{Dependence of the number of iterations needed for convergence on the learning rate. 
+    NAG-GS is more robust to changes in the learning rate than gradient descent (GD), accelerated gradient descent (AGD), and AC-SA. 
+    NAG-GS converges faster if the learning rate is sufficiently large. 
+    % The number of iterations $10^{10}$ indicates the divergence.
+    }
+    \label{fig::quadratic_lr_compare}
+\end{figure}
+
+\subsection{Logistic regression}
+\label{subsec:logi_reg}
+
+In this section, we benchmark the NAG-GS method against SGD with momentum (SGD-M) and AdamW optimizers on the multiclass logistic regression model and MNIST dataset~\cite{lecun2010mnist}.
+\textcolor{black}{We select such competitors since they are the standard methods of choice in training deep neural networks. SGD-M typically shows better generalization, while AdamW automatically adjusts the learning rate and provides more stable convergence.}
+Since this problem is convex and non-quadratic, we consider this problem as the natural next test case after the theoretical analysis of the NAG-GS method in~\cref{subsec_convergenceanalysis} and numerical tests for the quadratic convex problem.
+We use the following hyperparameters: batch size is $500$, momentum term in SGD-M equals~$0.9$, $\mu=1$ and $\gamma=1$ in NAG-GS, and no weight decay in SGD-M and AdamW, i.e., AdamW coincides with Adam optimizer.
+In~\cref{tab::logReg}, we present the learning rates, final test accuracy, and the number of epochs necessary for convergence for every optimizer.
+We assume that the training process has converged if the change in the test accuracy is minor.
+We observe that the larger the learning rate, the better the performance of the NAG-GS.
+Note that the highest test accuracy is achieved by competitors only after 20 or 40 epochs, while NAG-GS with a larger learning rate achieves a similar performance already after ten epochs.
+At the same time, we observe that the constant small learning rate leads to poor performance of the NAG-GS method.
+These observations motivate the use of the NAG-GS optimizer in the first stage of training to achieve high test accuracy after a small number of epochs.
+If this test accuracy is still insufficient, switching to another optimizer or decreasing the learning rate could be a good strategy for improving performance.
+In this section, we confirm numerically that the NAG-GS method allows larger learning rate values than the SGD-M, AdamW {\color{blue} and AC-SA optimizers}.
+Moreover, the results indicate that the semi-implicit nature of the NAG-GS method indeed ensures the acceleration effect through the use of larger learning rates while preserving the high performance of the model.
+This behavior holds not only for convex quadratic problems but also for non-quadratic convex ones. 
+  \begin{table}[!ht]
+      \centering
+      \caption{{\color{black}{Test accuracies for NAG-GS, SGD-M, AdamW {\color{blue} and AC-SA} that train the multiclass logistic regression model. 
+      The reported accuracies are averaged over three random seeds, and standard deviations are also presented.
+      NAG-GS with a learning rate $\alpha=0.5$ converges to the highest test accuracy after only 10 epochs, while the performance of AdamW is similar only after 40 epochs and uses $\alpha = 10^{-3}$.
+      We highlight the best test accuracy in bold and underline the second-best result. 
+      }}}
+      \scalebox{0.9}{
+      \begin{tabular}[t]{ccccc}
+    \toprule
+     Learning rate, $\alpha$ & \# epochs & Optimizer & Best test accuracy \\
+     \midrule
+     \multirow{4}{*}{$10^{-3}$} & \multirow{4}{*}{$40$} & NAG-GS &  $88.47 \pm 0.05$ \\
+     & & SGD-M & $92.01 \pm 0.04$ \\
+     & & AdamW & $\mathbf{92.71 \pm 0.01}$ \\
+     & & AC-SA & $\underline{92.67 \pm 0.05}$ \\
+     \midrule
+     \multirow{4}{*}{$10^{-2}$} & \multirow{4}{*}{$20$} & NAG-GS & $90.99 \pm 0.02 $  \\
+     & & SGD-M & $\mathbf{92.50 \pm 0.04}$\\
+     & & AdamW & $\underline{92.17 \pm 0.15}$ \\
+     & & AC-SA & $92.15 \pm 0.16$ \\
+     \midrule
+     \multirow{4}{*}{$0.1$} & \multirow{4}{*}{$15$} & NAG-GS & $\mathbf{92.18 \pm 0.07}$   \\
+     & & SGD-M & $\underline{92.03 \pm 0.08}$\\
+     & & AdamW & $89.83 \pm 0.24$ \\
+     & & AC-SA & $90.93 \pm 0.15$ \\
+     \midrule
+     \multirow{4}{*}{$0.5$} & \multirow{4}{*}{$10$} & NAG-GS & $\mathbf{92.38 \pm 0.02}$  \\
+     & & SGD-M & $\underline{90.04 \pm 0.35}$ \\
+     & & AdamW & $88.66 \pm 0.99$ \\
+     & & AC-SA & $88.92 \pm 0.21$\\
+     \bottomrule
+      \end{tabular}
+      }
+      \label{tab::logReg}
+  \end{table}
+  
+To solve the multiclass classification problem with logistic regression, we employ stochastic gradient estimation with all considered optimizers.
+Therefore, the effect of the batch size used in gradient estimation is important for understanding the robustness of the optimizers to the noise in the gradient estimation.
+To illustrate the effect of batch size on test accuracy, we simultaneously vary batch size and learning rate magnitude for the SGD-M, AdamW, {\color{blue} AC-SA,} and NAG-GS optimizers.
+The number of epochs for a particular learning rate is the same as presented in Table~\ref{tab::logReg}.
+Figure~\ref{fig::batch-size-mnist} demonstrates how the best test accuracy depends on the batch size for a range of learning rates. 
+It highlights that the NAG-GS optimizer achieves a higher best test accuracy than \textcolor{blue}{SGD-M}, AdamW {\color{blue} and AC-SA} in cases where a large learning rate and a large batch size are used. 
+This feature makes NAG-GS preferable for utilizing GPU resources effectively in contrast to SGD-M, whose performance drops with larger batch sizes. 
+Additionally, we observe that AdamW's performance degrades uniformly with large learning rates across all considered batch sizes.
+Thus, we show that NAG-GS achieves superior test accuracy in the multiclass classification problem in cases where a large learning rate and a large batch size are used.
+This regime is relevant to the considered problem since a large batch size improves GPU utilization and a large learning rate yields faster convergence, as shown in Table~\ref{tab::logReg}.
+{\color{blue} In addition, we observe that the AC-SA method behaves similarly to AdamW; therefore, we exclude it from further comparison and focus primarily on standard approaches for training models for CV and NLP tasks.}
+
+\begin{figure}[!h]
+    \centering
+    \begin{subfigure}{0.4\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{fig/mnist-logreg-adamw.pdf}
+        \caption{AdamW}
+    \end{subfigure}
+    ~
+    \begin{subfigure}{0.4\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{fig/mnist-logreg-nag-gs.pdf}
+        \caption{NAG-GS}
+    \end{subfigure}
+    \\
+    \begin{subfigure}{0.4\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{fig/mnist-logreg-sgdm.pdf}
+        \caption{\textcolor{blue}{SGD-M}}
+    \end{subfigure}
+    ~
+    \begin{subfigure}{0.4\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{fig/mnist-logreg-acsa.pdf}
+        \caption{AC-SA}
+    \end{subfigure}
+    \caption{{\color{black}{Dependence of the best test accuracy on the batch size for various learning rates. The legend for plot b) works for plots a), c), and d). NAG-GS demonstrates robustness to large learning rates and batch sizes in contrast to the competitors. }}}
+    \label{fig::batch-size-mnist}
+\end{figure}
+
+
+
+
+\subsection{VGG-11 and ResNet-20}
+\label{subsec:resnet}
+
+We compare NAG-GS and SGD with momentum and weight decay (SGD-MW) on VGG-11~\cite{simonyan2014very} and ResNet-20~\cite{he2016deep} models.
+We do not consider AdamW here since it consumes more memory than SGD-MW, and this drawback becomes significant for these models.
+{\color{blue} We also exclude AC-SA from the comparison in the non-convex setup, since AC-SA shows similar or worse performance than AGD/SGD-M methods even in the convex setups; see Sections~\ref{sec:exp-toy-problem} and~\ref{subsec:logi_reg}.}
+Training these models leads to non-convex stochastic optimization problems, which appear to be the next complexity level for the testing NAG-GS optimizer.
+Below, we demonstrate numerically the superior performance of NAG-GS in the first epochs of training the considered models using a large learning rate. 
+
+\paragraph{VGG-11.}
+We test the VGG-11 model on the CIFAR-10 image classification problem~\cite{krizhevsky2009learning} and demonstrate the robustness of NAG-GS to large learning rates {\color{blue} in the large batch size regime} compared to SGD-MW.
+The hyperparameters are the following: batch size equals 100, and the number of epochs is 50. 
+We use the constant $\gamma=1.$ and $\mu=10^{-4}$ for NAG-GS, momentum term equal $0.9$ and weight decay is $10^{-4}$ in SGD-MW.
+In comparison, we use two approaches: the best test accuracy achieved after 50 epochs and the convergence in the first epochs.
+
+\begin{minipage}[c]{0.4\textwidth}
+\centering
+      \captionof{table}{\textcolor{black}{Best test accuracies averaged over three random seeds for NAG-GS and SGD-MW optimizers. We use the VGG11 model on the CIFAR10 dataset for 50 epochs. 
+      NAG-GS achieves higher test accuracy for larger learning rates (in bold), while SGD-MW diverges for them. 
+      SGD-MW achieves slightly higher test accuracy for the learning rate 0.01.
+      Dash means divergence.}
+      }
+      \scalebox{0.7}{
+      \begin{tabular}{p{1cm}cc} %p{1cm}cp{1.4cm}c
+    \toprule
+     Learning rate, $\alpha$ & Optimizer & Best test accuracy \\
+     \midrule
+     \multirow{2}{*}{$10^{-3}$} & NAG-GS & $66.15 \pm 0.81$ \\
+     & SGD-MW & $78.84 \pm 0.21$ \\
+     \midrule
+     \multirow{2}{*}{$10^{-2}$} & NAG-GS & $78.60 \pm 0.40$ \\
+      & SGD-MW & $81.58 \pm 0.23$ \\
+      \midrule
+     \multirow{2}{*}{$0.1$} & NAG-GS & $81.50 \pm 0.14$ \\
+     & SGD-MW & $-$ \\
+     \midrule
+     \multirow{2}{*}{$0.15$} & NAG-GS & $\mathbf{81.75 \pm 0.06}$ \\
+     & SGD-MW & $-$ \\
+     \bottomrule
+      \end{tabular}
+      }
+      \label{tab:vgg11}
+\end{minipage}
+~
+\begin{minipage}[c]{0.53\textwidth}
+    \begin{center}
+        \includegraphics[width=0.999\linewidth]{fig/vgg11_nags-gs_sgd.pdf}
+        \captionof{figure}{Comparison of convergence NAG-GS and SGD-MW with different learning rates. NAG-GS achieves higher test accuracy faster than SGD-MW (see 1--10 epochs) while converging to a similar test accuracy during the middle of training. \textcolor{black}{These lines are averaged over three random seeds, and the standard deviation is negligible and not plotted.}}
+        \label{fig::vgg11_convergence}
+    \end{center}
+\end{minipage}
+
+The first approach is illustrated in Table~\ref{tab:vgg11}, where we show the best test accuracy achieved during training. 
+From this table, it follows that NAG-GS achieved higher best test accuracy than SGD-M{\color{black}{W}} due to the larger learning rate.
+The second approach is presented in Figure~\ref{fig::vgg11_convergence}, where one can see that NAG-GS with a large learning rate $(\alpha = 0.15)$ converges faster in the first ten epochs than SGD-MW with a smaller learning rate.
+We show only the first 20 epochs instead of the complete 50 epochs to highlight the gap at the beginning of the training. 
+In further epochs, the test accuracy given by NAG-GS and SGD-MW remains similar.
+
+\textcolor{black}{Similar to the logistic regression model, we include the analysis of batch size effect on the best test accuracy for the NAG-GS and SGD-MW optimizers.
+Figure~\ref{fig::vgg11-batch_size} demonstrates that NAG-GS converges for large learning rates in contrast to the SGD-MW optimizer. 
+We also observe that a large learning rate regime for NAG-GS preserves the best test accuracy as the batch size increases.
+Thus, NAG-GS behavior in training a non-convex VGG11 model looks similar to the training of the convex logistic regression model.}
+
+
+\begin{figure}[!h]
+    \centering
+    \begin{subfigure}{0.48\textwidth}
+        \includegraphics[width=\linewidth]{fig/cifar10-vgg11-nag-gs.pdf}
+        \subcaption{NAG-GS}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}{0.48\textwidth}
+        \includegraphics[width=\linewidth]{fig/cifar10-vgg11-sgdmw.pdf}
+        \subcaption{SGD-MW}
+    \end{subfigure}
+    \caption{Dependence of the best test accuracy on the batch size for various learning rates, VGG11 model and CIFAR-10 dataset. The number of epochs is 50. NAG-GS converges over a larger range of learning rates, and its performance drops less for larger learning rates as the batch size increases. {\color{blue} Learning rates $0.1$ and $0.15$ lead to divergence or stagnating of SGD-MW for considered batch sizes, therefore we exclude them from plot (b).}}
+    \label{fig::vgg11-batch_size}
+\end{figure}
+
+
+\paragraph{ResNet-20.}
+\label{par:resnet20}
+We carried out intensive experiments to evaluate the performance of NAG-GS in training residual networks.
+In particular, we use the ResNet-20 model and the CIFAR-10 dataset and the corresponding parameters reported in the literature.
+The experimental setup is the same except for the optimizer and its parameters. 
+The best test score for NAG-GS is achieved for $\alpha = 0.11$, $\gamma = 17$, and $\mu = 0.01$.
+\textcolor{blue}{The search space for these hyperparameters is 
+$\alpha \sim \mathrm{LogUniform}(10^{-2}, 10^2)$, 
+$\gamma \sim \mathrm{LogUniform}(10^{-2}, 10^2)$ and 
+$\mu \sim \mathrm{Uniform}(-10, 100)$, where $\sim$ denotes the sampling procedure used in the Optuna library~\cite{akiba2019optuna}.
+Here, $\mu$ is treated as a free damping parameter of NAG-GS in the deep-learning experiments and is not constrained to coincide with the strong convexity modulus used in the theoretical analysis.}
+
+In addition, $\mathrm{LogUniform}(a, b)$ and $\mathrm{Uniform}(a, b)$ denote the log-uniform and uniform distributions on the given segments, respectively.
+We compare the convergence of NAG-GS and SGD-MW in terms of loss and test accuracy in~\cref{fig:resnet}. 
+The proposed NAG-GS optimizer provides better test accuracy than SGD-MW during the first 150 epochs. 
+In the following epochs, the performance of NAG-GS and SGD-MW  becomes similar.
+This observation confirms that the potential application of the NAG-GS optimizer is to improve performance in the first epochs, thereby speeding up convergence and reducing costs for the warm-up stage.
+A detailed analysis of this effect will be the subject of future work.
+
+\begin{figure}[!ht]
+    \centering
+    \begin{subfigure}{0.49\textwidth}
+    \includegraphics[width=\linewidth]{fig/resnet20_nags-gs_sgd_loss.pdf}
+    \end{subfigure}
+    ~
+    \begin{subfigure}{0.49\textwidth}
+    \includegraphics[width=\linewidth]{fig/resnet20_nags-gs_sgd_acc.pdf}
+    \end{subfigure}
+    \caption{Comparison of NAG-GS and SGD-MW on ResNet-20 model and CIFAR-10. NAG-GS outperforms SGD-MW uniformly in the first 150 epochs and provides the same accuracy further.}
+    \label{fig:resnet}
+\end{figure}
+
+\subsection{Transformer Models}
+\label{subsec:transformer-models}
+
+\subsubsection{RoBERTa}
+
+In this section, we test NAG-GS for fine-tuning the pre-trained RoBERTa model from \textsc{transformers} library~\cite{wolf2020transformers} on GLUE benchmark datasets~\cite{wang2018glue}.
+In this benchmark, the reference optimizer is AdamW~\cite{loshchilov2019decoupled} with a polynomial learning rate schedule. 
+The training setup defined in~\cite{liu2019roberta} is used for both NAG-GS and AdamW optimizers.
+
+We search for an optimal learning rate and $\gamma$ for the NAG-GS optimizer with fixed $\mu = 1$ to get the best performance on the task.
+Search space consists of learning rate $\alpha$ from $[10^{-3},\,10^0]$, factor $\gamma$ from $[10^{-2},\,10^0]$.
+Note that NAG-GS is used with a constant learning rate to simplify hyperparameter search.
+
+Regarding learning rate values, the one allowed by AdamW is around $10^{-5}$ while NAG-GS allows a much larger value of $10^{-2}$. 
+\textcolor{black}{At the same time, optimal value for $\gamma$ in NAG-GS is found to be 1.}
+Evaluation results on GLUE tasks are presented in~\cref{tab:glue-metrics-best}.
+Despite a rather restrained search space for NAG-GS hyperparameters, it demonstrates better performance on some tasks and competitive performance on others.
+
+\begin{table*}[!h]
+\centering
+    \caption{
+        Comparison of AdamW and NAG-GS optimizers in fine-tuning on GLUE benchmark. 
+        We use reported hyperparameters for AdamW. 
+        We search hyperparameters of NAG-GS for the best performance metric. 
+        NAG-GS outperforms or is competitive with AdamW on the considered tasks. 
+    }
+    \scalebox{0.9}{
+    \begin{tabular}{lrrrrrrrrrr}
+    \toprule
+    Optimizer & \textsc{CoLA}  & \textsc{MNLI}  & \textsc{MRPC}  & \textsc{QNLI}  & \textsc{QQP}   & \textsc{RTE}   & \textsc{SST2}  & \textsc{STS-B} & \textsc{WNLI} \\
+    \midrule
+    AdamW     & \textbf{61.60} & \textbf{87.56} &         88.24  & \textbf{92.62} & \textbf{91.69} & \textbf{78.34} & \textbf{94.95} & \textbf{90.68} & \textbf{56.34} \\
+    NAG-GS    & \textbf{61.60} &         87.24  & \textbf{90.69} &         92.59  &         91.01  &         77.97  &         94.50  &         90.21  & \textbf{56.34} \\
+    \bottomrule
+\end{tabular}
+}
+    \label{tab:glue-metrics-best}
+\end{table*}
+
+\subsubsection{Vision Transformer model}
+
+We used the Vision Transformer model~\cite{wu2020visual}, which was pre-trained on the ImageNet dataset~\cite{deng2009imagenet}, and fine-tuned it on the \texttt{food101} dataset~\cite{bossard14} using NAG-GS and AdamW. 
+This task involves classifying a dataset of 101 food categories, with 1000 images per class. 
+To ensure a fair comparison, we first conducted an intensive hyperparameter search~\cite{wandb} for all possible hyperparameter configurations on a subset of the data for each method and selected the best configuration.
+\textcolor{black}{The intervals of the search are the following: lr $\sim \mathrm{LogUniform}(10^{-4}, 10^{-1})$, $\mu \sim \mathrm{Uniform}(10^{-2}, 10)$, $\gamma \sim \mathrm{Uniform}(10^{-2}, 10)$.}  
+After the hyperparameter search, we performed the experiments on the entire dataset. 
+The results are presented in Table~\ref{tab:vit_results}.
+We observed that properly-tuned NAG-GS outperformed AdamW in both training and evaluation metrics. 
+Also, NAG-GS reached higher accuracy than AdamW after one epoch. 
+The optimal hyperparameters found for NAG-GS are $\alpha = 0.07929, \gamma = 0.3554, \mu = 0.1301$; for AdamW $\mathrm{lr} = 0.00004949, \beta_1 = 0.8679, \beta_2 = 0.9969$.
+
+\begin{table}[!ht]
+      \centering
+      \caption{Test accuracies of NAG-GS and AdamW for Vision Transformer model fine-tuned on \texttt{food101} dataset. The NAG-GS outperforms AdamW after the presented number of epochs.}
+      \label{tab:vit_results}
+      \begin{tabular}[t]{ccc}
+    \toprule
+      Stage & NAG-GS &  AdamW \\
+     \midrule
+     After 1 epoch & $\mathbf{0.8419}$ &  $0.8269$ \\
+     After 25 epochs & $\mathbf{0.8606}$ &  $0.8324$ \\
+     \bottomrule
+      \end{tabular}
+  \end{table}
+
+
+
+
+\section{Conclusion and further works}
+\label{sec:conclusion}
+
+We have presented a new and theoretically motivated stochastic optimizer called NAG-GS. 
+It comes from the semi-implicit Gauss-Seidel discretization of a well-chosen accelerated Nesterov-like SDE. 
+These building blocks ensure two central properties for NAG-GS: (1) the ability to accelerate the optimization process and (2) better robustness to large learning rates {\color{blue} for large batch size}. 
+We demonstrate these features theoretically and provide a detailed analysis of the convergence of the method in the quadratic case. 
+Moreover, we show that NAG-GS is competitive with state-of-the-art methods for training a small logistic regression model and larger models like ResNet-20, VGG-11, and Transformers.  
+In numerical tests, NAG-GS demonstrates faster convergence in the first epochs due to the larger learning rate and similar final scores to standard optimizers, which work only with smaller learning rates.
+Further work will focus on the non-asymptotic convergence analysis of NAG-GS and the development of proper learning rate schedulers for it.
+
+
+% \subsubsection*{Acknowledgments}
+
+% \textcolor{blue}{We would like to thank the anonymous reviewers for their remarkably detailed and constructive comments, which significantly improved the quality and clarity of this manuscript.}
+
+% VL acknowledges the support by the Ministry of Economic Development of the Russian Federation (agreement No. 139-10-2025-034 dd. 19.06.2025, \\
+% IGK 000000C313925P4D0002).
+\subsubsection*{Acknowledgments}
+
+\textcolor{blue}{We would like to thank the anonymous reviewers for their remarkably detailed and constructive comments, which significantly improved the quality and clarity of this manuscript.}
+
+VL acknowledges the support of the Ministry of Economic Development of the Russian Federation (Agreement No.~139-10-2025-034, dated 19.06.2025; IGK \\
+000000C313925P4D0002).
+
+
+\bibliographystyle{spmpsci}
+\bibliography{lib}
+
+\end{document}
+
+

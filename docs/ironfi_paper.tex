@@ -1,0 +1,1069 @@
+\documentclass[letterpaper]{article}
+\usepackage{aaai2026}  % DO NOT CHANGE THIS
+\usepackage{times}
+\usepackage{helvet}
+\usepackage{courier}
+\usepackage[hyphens]{url}
+\usepackage{graphicx}
+\usepackage{natbib}
+\usepackage{caption}
+
+% Your math/tools (allowed by AAAI)
+\usepackage{amsmath,amssymb,amsthm,mathtools}
+\usepackage{algorithm,algorithmic}
+\usepackage{xcolor}
+\usepackage{subcaption}
+\graphicspath{{figs/}}
+
+% --- Replace bbm (Type 3) with dsfont (Type 1) ---
+% \usepackage{bbm} % <-- remove
+\usepackage{dsfont}
+\let\mathbbm\mathds  % so existing \mathbbm{1} keeps working
+
+% --- Safe fallback if hyperref isn't loaded (do NOT load hyperref yourself) ---
+\makeatletter
+\@ifpackageloaded{hyperref}{}{\providecommand{\texorpdfstring}[2]{#1}}
+\makeatother
+
+
+
+% ---------- Title & macros ----------
+\title{\Large\bf IRON: Implicit Resolvent Optimization under Noise\\[2pt]
+\large A Fully-Implicit Accelerated Method with LM/TR Inner Solves and Variance Decay}
+\author{Anonymous submission}
+\date{\today}
+
+\newcommand{\IRON}{\textsc{IRON}}
+\newcommand{\IRONfi}{\textsc{IRON}\textsubscript{FI}} % if this errors in AAAI, replace by: \newcommand{\IRONfi}{\textsc{IRON}\(_{\mathrm{FI}}\)}
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\Var}{\mathrm{Var}}
+\newcommand{\prox}{\mathrm{prox}}
+\newcommand{\Id}{\mathrm{Id}}
+\newcommand{\norm}[1]{\left\lVert #1\right\rVert}
+\newcommand{\ip}[2]{\left\langle #1,\,#2\right\rangle}
+\newcommand{\cO}{\mathcal{O}}
+
+% ---------- Theorem environments ----------
+\theoremstyle{plain}
+\newtheorem{theorem}{Theorem}[section]
+\newtheorem{proposition}[theorem]{Proposition}
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{corollary}[theorem]{Corollary}
+\theoremstyle{definition}
+\newtheorem{assumption}[theorem]{Assumption}
+\theoremstyle{remark}
+\newtheorem{remark}[theorem]{Remark}
+
+\begin{document}
+\maketitle
+
+
+
+
+
+\begin{abstract}
+We present a unified continuous--discrete framework for understanding how discretization choices in stochastic optimization affect the stationary distribution around critical points. Starting from a second-order stochastic differential equation (SDE) modeling an accelerated gradient flow, we show that fully implicit (Backward--Euler) discretization yields a resolvent (proximal) update with a Levenberg--Marquardt (LM) or trust-region (TR) inner system. The resulting method, \IRONfi, exhibits a mean-square error recursion where both the contraction factor and the noise floor scale as $1/\alpha$, with $\alpha$ the step size. Consequently, as $\alpha$ increases, the stationary variance
+ diminishes---vanishing in the limit (assuming sufficiently accurate inner solves). We provide detailed theoretical analysis for smooth, strongly convex objectives, supported by experiments in (strongly) convex and mildly nonconvex settings. To our knowledge, this is the first work to clearly explain how an SDE discretization controls the stationary variance in accelerated stochastic optimization, offering a new perspective on robust acceleration rooted in first principles.
+\end{abstract}
+
+
+
+
+
+
+
+
+% ===================== Setup =====================
+
+\paragraph{Motivation}
+Discrete-time analyses dominate stochastic optimization, yet the continuous-time viewpoint clarifies stability and noise robustness. We adopt a unified perspective that links (i) the choice of continuous dynamics, (ii) the statistics and injection channel of gradient noise, and (iii) the numerical discretization. In this work, we make explicit—to our knowledge for the first time in this setting—how the discretization governs the stationary variance near minimizers.
+
+Semi-implicit schemes such as NAG-GS~\cite{leplat2023naggssemiimplicitacceleratedrobust} enlarge stability regions but retain explicit components. By contrast, a fully implicit Backward--Euler discretization of a stochastic accelerated flow yields a resolvent (proximal) update with an inherent Levenberg--Marquardt (LM) / trust-region (TR) structure. Under our modeling choices, this leads to a mean-square recursion where both the contraction factor and the noise floor scale as $1/\alpha$ (with $\alpha$ the step size); thus increasing the step size reduces the stationary variance—vanishing in the limit, provided inner solves are sufficiently accurate.
+
+\paragraph{Mathematical setup.}
+We study stochastic optimization of a smooth objective $f:\R^n\to\R$, in a setting motivated by semi-implicit acceleration (NAG-GS)~\cite{leplat2023naggssemiimplicitacceleratedrobust}. We model the algorithmic dynamics by the following second-order stochastic differential equation (SDE) in position $x_t\in\R^n$, auxiliary velocity $v_t\in\R^n$, and damping $\gamma_t>0$:
+
+
+
+
+
+\begin{equation}\label{eq:sde-system}
+\left\{
+\begin{aligned}
+d x_t &= \big(v_t - x_t\big)\,dt,\\
+d v_t &= \Big(\frac{\mu}{\gamma_t}\big(x_t - v_t\big) - \frac{1}{\gamma_t}\nabla f(x_t)\Big)\,dt
+\;+\; \Sigma^{1/2}\, dW_t,\\
+d \gamma_t &= (\mu - \gamma_t)\,dt,
+\end{aligned}
+\right.
+\end{equation}
+where $W_t$ is a standard Brownian motion in $\R^n$ and $\Sigma\succeq 0$ is the diffusion covariance (often $\Sigma=\sigma^2 I$).\footnote{If $\Sigma=\rho^2 I$, then $\E\|\Sigma^{1/2}\eta\|^2=\rho^2\,\E\|\eta\|^2=\rho^2 n$, so our variance proxy can be taken as $\sigma^2:=\mathrm{tr}(\Sigma)=\rho^2 n$.}
+The drift terms match the noiseless accelerated flow; the diffusion models sampling noise at the $v$-equation.
+
+\paragraph{Minimal assumptions.}
+\begin{assumption}[Smooth strong convexity]\label{ass:sc}
+There exist $0<\mu\le L<\infty$ such that for all $x,y$,
+\[
+\frac{\mu}{2}\norm{x-y}^2 \le f(x)-f(y)-\ip{\nabla f(y)}{x-y} \le \frac{L}{2}\norm{x-y}^2.
+\]
+Let $x^\star=\arg\min f$ and $\kappa=L/\mu$.
+\end{assumption}
+
+\begin{assumption}[Unbiased stochastic gradients / diffusion proxy]\label{ass:noise}
+We take the diffusion covariance of the SDE as $\Sigma$ (typically $\Sigma=\sigma^2 I$). Over a step of length $\alpha_k$,
+\[
+W_{t_{k+1}}-W_{t_k} \;=\; \sqrt{\alpha_k}\,\eta_k,\qquad \eta_k\sim\mathcal{N}(0,I_n),
+\]
+so the injected random vector in the $v$-update has covariance $\alpha_k \Sigma$.
+\end{assumption}
+
+\paragraph{Notation.}
+We use $\ip{\cdot}{\cdot}$ and $\norm{\cdot}$ for the Euclidean inner product and norm. Constants $c,C,C_i,K_i$ may depend on $(\mu,L,\gamma_0)$ but never on the stepsizes $\{\alpha_k\}$ when we say “independent of $\alpha$”.
+
+\medskip
+\noindent\emph{Context.} In discrete time, our fully implicit method (\IRONfi) will be an Implicit–Euler step applied componentwise to \eqref{eq:sde-system}, followed by a simple algebraic elimination that exposes a proximal/resolvent form. This is the source of both the LM/TR inner system and the variance-shrinkage effect.
+
+% ===================== Scheme =====================
+\section{From flow to fully-implicit step (\IRONfi)}\label{sec:scheme}
+We now apply Implicit Euler to the SDE system \eqref{eq:sde-system} over a time step of length $\alpha_k>0$.
+
+\subsection*{Step 1: Implicit–Euler discretization of the system}
+Using $W_{k+1}-W_k=\sqrt{\alpha_k}\,\eta_k$, $\eta_k\sim\mathcal{N}(0,I_n)$:
+\begin{align}
+\frac{x_{k+1}-x_k}{\alpha_k} &= v_{k+1} - x_{k+1}, \label{eq:IE-x}\\
+\frac{v_{k+1}-v_k}{\alpha_k} &=
+   \frac{\mu}{\gamma_k}\big(x_{k+1}-v_{k+1}\big)
+   - \frac{1}{\gamma_k}\nabla f(x_{k+1})
+   \label{eq:IE-v}\\
+&\qquad + \Sigma^{1/2}\,\frac{W_{k+1}-W_k}{\alpha_k} \notag\\
+\frac{\gamma_{k+1}-\gamma_k}{\alpha_k} &= \mu - \gamma_{k+1}. \label{eq:IE-gamma}
+\end{align}
+
+From \eqref{eq:IE-x}, $v_{k+1}=x_{k+1}+\frac{x_{k+1}-x_k}{\alpha_k}$, and \eqref{eq:IE-gamma} solves explicitly.
+For later reference we collect the two state updates:
+\begin{equation}\label{eq:v-gamma}
+v_{k+1}=\frac{x_{k+1}-x_k}{\alpha_k}+x_{k+1},
+\quad
+\gamma_{k+1}=\frac{\gamma_k+\alpha_k\mu}{1+\alpha_k}.
+\end{equation}
+
+\subsection*{Step 2: Eliminate $v_{k+1}$ and collect terms}
+Substitute $v_{k+1}$ into \eqref{eq:IE-v} and multiply by $\alpha_k$:
+\begin{equation*}
+    \begin{aligned}
+        v_{k+1}-v_k \;& =\; -\frac{\mu}{\gamma_k}\big(x_{k+1}-x_k\big)\;-\;\frac{\alpha_k}{\gamma_k}\nabla f(x_{k+1}) \\
+        & \;+\;\Sigma^{1/2}\sqrt{\alpha_k}\,\eta_k.
+    \end{aligned}
+\end{equation*}
+But also $v_{k+1}-v_k = \big(x_{k+1}-v_k\big)+\frac{x_{k+1}-x_k}{\alpha_k}$. Rearranging gives
+\begin{equation*}
+    \begin{aligned}
+        & \Big(1+\frac{1}{\alpha_k}+\frac{\mu}{\gamma_k}\Big)\,x_{k+1}\;-\;v_k\;-\;\Big(\frac{1}{\alpha_k}+\frac{\mu}{\gamma_k}\Big)x_k\; \\& +\;\frac{\alpha_k}{\gamma_k}\nabla f(x_{k+1})
+\;=\; \Sigma^{1/2}\sqrt{\alpha_k}\,\eta_k.
+    \end{aligned}
+\end{equation*}
+
+Introduce
+\begin{equation}\label{eq:def-params}
+\tau_k:=\frac{1}{\alpha_k}+\frac{\mu}{\gamma_k},\quad
+c_k:=\frac{v_k+\tau_k x_k}{1+\tau_k},\quad
+\lambda_k:=\frac{\alpha_k}{\gamma_k(1+\tau_k)}.
+\end{equation}
+Then the previous identity becomes the optimality condition
+\begin{equation}\label{eq:opt-cond}
+\frac{\alpha_k}{\gamma_k}\nabla f(x_{k+1}) + (1+\tau_k)\Big(x_{k+1}-c_k\Big)
+\;=\; \Sigma^{1/2}\sqrt{\alpha_k}\,\eta_k.
+\end{equation}
+
+\subsection*{Step 3: Proximal (resolvent) reformulation and the noise term}
+Move the right-hand side of \eqref{eq:opt-cond} to the left and divide by $(1+\tau_k)$:
+\[
+\frac{\alpha_k}{\gamma_k}\nabla f(x_{k+1}) + (1+\tau_k)\Big(x_{k+1}-c_k-\underbrace{\frac{\Sigma^{1/2}\sqrt{\alpha_k}}{1+\tau_k}\eta_k}_{:=\ \xi_k}\Big)=0.
+\]
+Equivalently,
+\begin{equation}\label{eq:prox-noisy-opt}
+0 \in \frac{\alpha_k}{\gamma_k}\,\partial f(x_{k+1})+(1+\tau_k)\Big(x_{k+1}-(c_k+\xi_k)\Big),
+\end{equation}
+whose unique solution (by strong convexity) is the proximal step
+\begin{equation}\label{eq:proxsub}
+\begin{aligned}
+  x_{k+1} & =\arg\min_{x}\Big\{\frac{\alpha_k}{\gamma_k}\,f(x)+\frac{1+\tau_k}{2}\norm{x-(c_k+\xi_k)}^2\Big\} \\
+& \;=\; \prox_{\lambda_k f}\!\big(c_k+\xi_k\big),  
+\end{aligned}
+\end{equation}
+with $\lambda_k$ as in \eqref{eq:def-params}. This displays the \textbf{trust-region} center $c_k$ and the \textbf{resolvent} (LM) parameter $\lambda_k$.
+
+\paragraph{What exactly is $\xi_k$ ? }
+By construction,
+\begin{equation*}
+    \begin{aligned}
+        & \xi_k \;=\; \frac{\Sigma^{1/2}\sqrt{\alpha_k}}{1+\tau_k}\,\eta_k,\quad 
+\eta_k\sim\mathcal{N}(0,I_n), \\
+& \E[\eta_k]=0,\ \E[\eta_k\eta_k^\top]=I_n.
+    \end{aligned}
+\end{equation*}
+
+Therefore $\E[\xi_k]=0$ and
+\begin{equation}\label{eq:xi-var}
+\begin{aligned}
+    \E\norm{\xi_k}^2 \; =\; \frac{\alpha_k}{(1+\tau_k)^2}\,\E\!\left[\eta_k^\top \Sigma \eta_k\right]
+\;& =\; \frac{\alpha_k}{(1+\tau_k)^2}\,\mathrm{tr}(\Sigma) \\
+\;& \le\; \frac{\alpha_k}{(1+\tau_k)^2}\,\sigma^2,
+\end{aligned}
+\end{equation}
+where we set the variance proxy $\sigma^2:=\mathrm{tr}(\Sigma)$ (or any upper bound on $\E\|\Sigma^{1/2}\eta_k\|^2$). In the isotropic case $\Sigma=\rho^2 I_n$, this equals $\sigma^2=\rho^2 n$.
+
+\paragraph{Summary of the mapping.}
+Implicit Euler on \eqref{eq:sde-system} yields \eqref{eq:opt-cond}, the first-order optimality of \eqref{eq:proxsub}. The noise injected in the $v$-equation becomes an additive perturbation of the prox center, $c_k\mapsto c_k+\xi_k$, with second moment bounded as in \eqref{eq:xi-var}. The LM/TR structure comes from the Jacobian of the fixed-point map $u\mapsto c_k+\xi_k-\lambda_k\nabla f(u)$, namely $I+\lambda_k \nabla^2 f(u)$.
+
+\paragraph{WRJ Implicit-Euler connection.}
+For $\xi_k = 0$ (deterministic setting), Equation~\eqref{eq:proxsub} is exactly the Euclidean prox/resolvent in \citet{wilson2021lyapunov} (Implicit-Euler), with the auxiliary state coupled via \eqref{eq:IE-x} and \eqref{eq:IE-gamma}. See also \citet{luo2022from,hairer1996sode2}.
+
+\paragraph{LM/TR interpretation.}
+Optimality of \eqref{eq:proxsub} yields
+$0=\frac{\alpha_k}{\gamma_k}\nabla f(x_{k+1})+(1+\tau_k)(x_{k+1}-c_k)$, i.e.,
+$x_{k+1}=c_k-\lambda_k\nabla f(x_{k+1})$. Newton on $g(u):=u-(c_k-\lambda_k\nabla f(u))$ uses
+$Jg(u)=I+\lambda_k\nabla^2 f(u)$: a Levenberg-Marquardt system. The subproblem is a trust-region model around~$c_k$ \citep{levenberg1944method,marquardt1963algorithm,conn2000trust}.
+
+% ===================== Operator background =====================
+\section{Operator-theoretic background (resolvent facts)}
+\begin{lemma}[Resolvent contraction]\label{lem:resolvent}
+If $f$ is $\mu$-strongly convex, then $\prox_{\lambda f}=(\Id+\lambda\nabla f)^{-1}$ is $(1+\lambda\mu)^{-1}$-Lipschitz:
+$\norm{\prox_{\lambda f}(u)-\prox_{\lambda f}(v)}\le (1+\lambda\mu)^{-1}\norm{u-v}$.
+\end{lemma}
+\noindent\textbf{Proof.} See Appendix~\ref{app:proof-1}.
+
+% ===================== Constant stepsize =====================
+\section{Core mean-square contraction (constant stepsize)}\label{sec:constant}
+Assume $\alpha_k\equiv \alpha\ge 1$, $\gamma_k\equiv \gamma>0$. Set
+\begin{equation*}
+    \begin{aligned}
+        & \tau=\frac{1}{\alpha}+\frac{\mu}{\gamma},\qquad \lambda=\frac{\alpha}{\gamma(1+\tau)},\quad \\
+& c_k=\frac{v_k+\tau x_k}{1+\tau},\qquad \hat c_k=c_k+\xi_k.
+    \end{aligned}
+\end{equation*}
+Define the energy $\mathcal{E}_k := f(x_k)-f(x^\star)+\frac{\gamma}{2}\norm{v_k-x^\star}^2$.
+
+\begin{lemma}[Energy equivalence]\label{lem:energy-eq}
+There exist $m_1,m_2>0$ (depending only on $\mu,L,\gamma$) such that
+$m_1\norm{x_k-x^\star}^2 \le \mathcal{E}_k \le m_2(\norm{x_k-x^\star}^2+\norm{v_k-x^\star}^2)$.
+\end{lemma}
+
+\begin{lemma}[Energy domination]\label{lem:energy-dom}
+By strong convexity, $f(x_k)-f^\star\ge (\mu/2)\|x_k-x^\star\|^2$, hence
+\[
+\|x_k-x^\star\|^2+\|v_k-x^\star\|^2 \;\le\; c_E\,\mathcal E_k,
+\qquad c_E:=\max\{2/\mu,\,2/\gamma\}.
+\]
+\end{lemma}
+
+\begin{lemma}[Center coupling]\label{lem:center}
+For $c_k=\frac{v_k+\tau x_k}{1+\tau}$,
+$\norm{c_k-x^\star}^2 \le \frac{2}{1+\tau}\norm{v_k-x^\star}^2 + \frac{2\tau}{1+\tau}\norm{x_k-x^\star}^2$.
+\end{lemma}
+
+\begin{lemma}[Velocity-position coupling]\label{lem:vx}
+For $\alpha\ge 1$, the update \eqref{eq:v-gamma} yields
+\[
+\|v_{k}-x^\star\|^2 \;\le\; 6\,\|x_{k}-x^\star\|^2 \;+\; 4\,\|x_{k-1}-x^\star\|^2.
+\]
+Consequently, with $m_2$ from Lemma~\ref{lem:energy-eq}, there exists $\bar m_2>0$ (depending only on $\mu,L,\gamma$) such that
+\[
+\E\mathcal{E}_k \;\le\; \bar m_2\Big(\E\|x_k-x^\star\|^2+\E\|x_{k-1}-x^\star\|^2\Big).
+\]
+\end{lemma}
+\noindent\textbf{Proof.} See Appendix~\ref{app:proof-2}.
+
+\begin{lemma}[Scaling with $\alpha$: product form]\label{lem:scale}
+Let $\tau=\frac{1}{\alpha}+\frac{\mu}{\gamma}$ and $\lambda=\frac{\alpha}{\gamma(1+\tau)}$ with $\alpha\ge 1$, $\gamma>0$, $\mu>0$. Then there exists $K_1>0$ such that
+\[
+\frac{1}{(1+\lambda\mu)^2} \;\le\; \frac{K_1}{\alpha^2},
+\quad
+\frac{1}{(1+\lambda\mu)^2}\cdot \frac{\alpha}{(1+\tau)^2} \;\le\; \frac{K_1}{(1+\mu/\gamma)^2}\cdot \frac{1}{\alpha}.
+\]
+In particular, the product term is $\cO(1/\alpha)$.
+\end{lemma}
+\noindent\textbf{Proof.} See Appendix~\ref{app:proof-3}.
+
+\begin{proposition}[One-step mean-square bound]\label{prop:onestep}
+Under Assumptions~\ref{ass:sc}-\ref{ass:noise}, for $\alpha\ge 1$, there exist $C_1,C_2>0$ (independent of $\alpha$) such that
+\[
+\E\norm{x_{k+1}-x^\star}^2 \;\le\; \frac{C_1}{\alpha^2}\,\E \mathcal{E}_k \;+\; \frac{C_2\,\sigma^2}{\alpha}.
+\]
+\end{proposition}
+\noindent\textbf{Proof.} See Appendix~\ref{app:proof-5}.
+
+
+\color{blue}
+
+\paragraph{One-step vs.\ two-step: what recurses?}
+Proposition~\ref{prop:onestep} gives a \emph{single-step} bound for $x_{k+1}$ in terms of the current energy $\mathcal E_k$.
+However, because the implicit-Euler coupling yields
+\[
+v_k \;=\; x_k + \frac{x_k-x_{k-1}}{\alpha},
+\]
+any recursion written purely in terms of $\E\|x_k-x^\star\|^2$ is naturally \emph{two-step} (it involves both $x_k$ and $x_{k-1}$ through $v_k$).
+To obtain a genuine \emph{one-step} inequality, we introduce a Lyapunov quantity that augments the state with one lag, namely
+\[
+V_k := \E\|x_k-x^\star\|^2 + \theta\,\E\|x_{k-1}-x^\star\|^2,
+\]
+for a suitable $\theta=\Theta(1/\alpha)$.
+The next theorem states a one-step recursion for $\{V_k\}$ with both the contraction and the noise floor scaling as $1/\alpha$.
+
+\begin{theorem}[IRON mean-square contraction with $1/\alpha$ noise floor]\label{thm:main}
+Under Assumptions~\ref{ass:sc}--\ref{ass:noise} with constant stepsize $\alpha\ge 1$ and fixed $\gamma>0$, there exist constants $G>0$ and $C>0$ (independent of $\alpha$) such that the Lyapunov quantity
+\[
+V_k \;:=\; \E\|x_k-x^\star\|^2 \;+\; \theta\,\E\|x_{k-1}-x^\star\|^2,
+\qquad
+\theta := \frac{\sqrt{B}}{\alpha},
+\]
+satisfies, for all $k\ge 1$,
+\begin{equation}\label{eq:Vk-recursion}
+V_{k+1} \;\le\; \frac{G}{\alpha}\,V_k \;+\; \frac{C\,\sigma^2}{\alpha}.
+\end{equation}
+Consequently, if $\alpha>G$ and $\rho:=G/\alpha\in(0,1)$, then for all $k\ge 1$,
+\[
+V_{k} \;\le\; \rho^{k-1}V_1 \;+\; \frac{C\,\sigma^2}{\alpha}\cdot\frac{1-\rho^{k-1}}{1-\rho},
+\]
+and therefore
+\[
+\E\|x_k-x^\star\|^2 \;\le\; V_k
+\;\le\; \rho^{k-1}V_1 \;+\; \frac{C\,\sigma^2}{\alpha(1-G/\alpha)}.
+\]
+In particular, if $\alpha\ge 2G$ then $\limsup_{k\to\infty}\E\|x_k-x^\star\|^2 \le \frac{2C}{\alpha}\sigma^2$.
+\end{theorem}
+\color{black}
+\noindent\textbf{Proof.} See Appendix~\ref{app:proof-6}.
+
+
+\subsection{The Quadratic case}
+\label{sec:quad-exact}
+Consider $f(x)=\tfrac12 x^\top A x - b^\top x$ with $A\succeq \mu I$ and minimizer $x^\star=A^{-1}b$. 
+\color{blue}
+Set $\Sigma=\rho^2 I$ for clarity, so the noise is isotropic and the coordinates decouple in the eigenbasis of $A$. For a general covariance $\Sigma$, the $O(1/\alpha)$ variance decay still holds with $\sigma^2=\mathrm{tr}(\Sigma)$ as a proxy, but the per-eigendirection decoupling is no longer exact unless $\Sigma$ is diagonal in the eigenbasis of $A$ (for example if $A\Sigma=\Sigma A$). 
+\color{black}
+Work in the eigenbasis of $A$: let $A=Q\Lambda Q^\top$, $\Lambda=\mathrm{diag}(a_1,\dots,a_n)$, $a_i\in[\mu,L]$, and define errors $e_k:=Q^\top(x_k-x^\star)$ and $w_k:=Q^\top(v_k-x^\star)$. Recall
+\[
+\tau=\frac{1}{\alpha}+\frac{\mu}{\gamma},\qquad
+\lambda=\frac{\alpha}{\gamma(1+\tau)},\qquad
+r_i:=\frac{1}{1+\lambda a_i}.
+\]
+From the prox/optimality form \eqref{eq:proxsub}-\eqref{eq:prox-noisy-opt} and the state update \eqref{eq:v-gamma}, each coordinate $(e_{k,i},w_{k,i})$ obeys the exact linear stochastic recursion
+\begin{equation}\label{eq:quad-2x2}
+\begin{aligned}
+e_{k+1,i} \;&=\; \frac{r_i}{1+\tau}\,w_{k,i} \;+\; \frac{r_i\tau}{1+\tau}\,e_{k,i} \;+\; r_i\,\xi_{k,i},\\[-1mm]
+w_{k+1,i} \;&=\; \Big(\tfrac{1}{\alpha}+1\Big)e_{k+1,i} \;-\; \tfrac{1}{\alpha}e_{k,i}
+\end{aligned}
+\end{equation}
+where the injected center noise satisfies $\E[\xi_{k,i}]=0$ and $\E[\xi_{k,i}^2]=\alpha\rho^2/(1+\tau)^2$ (isotropic case).
+
+\begin{proposition}[Deterministic contraction and explicit stationary noise floor for quadratics]\label{prop:quad-explicit}
+Let $\alpha\ge 1$, $\gamma>0$, and $\mu>0$. For each eigen-direction $i$:
+\begin{enumerate}
+\item (Contraction) There exists $C_i=C_i(\mu,L,\gamma)$ such that
+\begin{equation*}
+    \begin{aligned}
+        \E\!\left[e_{k+1,i}^2 + w_{k+1,i}^2 \,\middle|\, e_{k,i},w_{k,i}\right]
+& \;\le\; \frac{C_i}{\alpha^2}\,(e_{k,i}^2+w_{k,i}^2) \\
+& \quad \;+\; \frac{C_i\,\rho^2}{\alpha}.
+    \end{aligned}
+\end{equation*}
+\color{blue}
+Consequently, summing over $i$ yields the same $O(1/\alpha^2)$ contraction plus $O(1/\alpha)$ noise floor for the full state $(e_k,w_k)$, and therefore implies the $O(1/\alpha)$ Lyapunov recursion of Theorem~\ref{thm:main} (since $w_k$ couples $(e_k,e_{k-1})$ through \eqref{eq:v-gamma}).
+
+\color{black}
+
+
+\item (Asymptotic explicit constant) As $\alpha\to\infty$,
+\begin{equation*}
+    \begin{aligned}
+        \lim_{\alpha\to\infty}\; \alpha\cdot \E\|x_\infty-x^\star\|^2
+& \;=\; \rho^2\,\gamma^2\,\sum_{i=1}^n \frac{1}{a_i^2} \\
+& \;=\; \frac{\gamma^2}{n}\,\sigma^2\,\mathrm{tr}\!\big(A^{-2}\big).
+    \end{aligned}
+\end{equation*}
+Thus the stationary MSE decays exactly like $C_{\mathrm{quad}}/\alpha$ with $C_{\mathrm{quad}}=(\gamma^2/n)\,\sigma^2\,\mathrm{tr}(A^{-2})$.
+\end{enumerate}
+\end{proposition}
+
+\begin{proof}[Sketch]
+Diagonalizing $A$ decouples coordinates. Write \eqref{eq:quad-2x2} as $z_{k+1,i}=M_i z_{k,i}+G_i \xi_{k,i}$ with $z_{k,i}=(e_{k,i},w_{k,i})$. Since $r_i=1/(1+\lambda a_i)\le K/\alpha$ (Lemma~\ref{lem:scale}), every entry of $M_i$ is $O(1/\alpha)$, hence $\|M_i\|_2\le C_i/\alpha$. Squaring and taking expectations yields Item~1 (the $\rho^2/\alpha$ contribution comes from $\E[\xi_{k,i}^2]$ and the $r_i$-gains). For Item~2, observe that for large $\alpha$, $r_i=\gamma(1+\mu/\gamma)/(\alpha a_i)+o(\alpha^{-1})$ and $(1+\tau)=1+\mu/\gamma+o(1)$, so the $e$-coordinate’s noise injection gain is $r_i+o(\alpha^{-1})$, giving
+\begin{equation*}
+    \begin{aligned}
+        \E[e_{\infty,i}^2] & \;=\; r_i^2\,\E[\xi_{k,i}^2] \;+\; o(\alpha^{-1}) \\
+&\;=\; \frac{\gamma^2(1+\mu/\gamma)^2}{\alpha^2 a_i^2}\cdot \frac{\alpha\rho^2}{(1+\mu/\gamma)^2} \;+\; o(\alpha^{-1}) \\
+& \;=\; \frac{\gamma^2\rho^2}{\alpha a_i^2}+o(\alpha^{-1}).
+    \end{aligned}
+\end{equation*}
+Summing over $i$ yields the stated limit; the $w$-coordinate contributes only $o(\alpha^{-1})$ to $\E\|x_\infty-x^\star\|^2$ since $x$ is the first block. 
+\end{proof}
+
+\paragraph{Comparison to the general bound.}
+Theorem~\ref{thm:main} guarantees $\E\|x_\infty-x^\star\|^2\le \frac{C\,\sigma^2}{\alpha}$ for a constant $C$ depending on $(\mu,L,\gamma)$. In the quadratic case we obtain the sharper, explicit constant
+
+\color{blue}
+\[
+C_{\mathrm{quad}}=\frac{\gamma^2}{n}\,\sigma^2\,\mathrm{tr}(A^{-2})
+\;\le\; \frac{\gamma^2}{\mu^2}\,\sigma^2
+\quad\text{(since $\mathrm{tr}(A^{-2})\le n/\mu^2$).}
+\]
+\color{black}
+
+
+\begin{corollary}[Condition-number bounds for the quadratic constant]
+\label{cor:quad-kappa}
+For $f(x)=\frac12 x^\top A x-b^\top x$ with $\mu I \preceq A \preceq L I$, the explicit asymptotic constant from Proposition~\ref{prop:quad-explicit} satisfies
+\[
+C_{\mathrm{quad}}
+=\frac{\gamma^2}{n}\,\sigma^2\,\mathrm{tr}(A^{-2})
+\;\in\; 
+\frac{\gamma^2\sigma^2}{\mu^2}\,\Big[\,\frac{1}{\kappa^2},\ 1\,\Big]
+\]
+\end{corollary}
+\begin{proof}
+Since the eigenvalues $a_i$ of $A$ lie in $[\mu,L]$, we have
+$\sum_{i=1}^n \frac{1}{L^2} \le \sum_{i=1}^n \frac{1}{a_i^2} \le \sum_{i=1}^n \frac{1}{\mu^2}$.
+Multiply by $(\gamma^2/n)\sigma^2$.
+\end{proof}
+
+\color{blue}
+
+\subsubsection{Exact stationary covariance via a discrete Lyapunov equation}
+\label{sec:quad-lyapunov}
+
+Proposition~\ref{prop:quad-explicit} identifies the \emph{asymptotic} stationary noise constant as $\alpha\to\infty$.
+For quadratics, one can in fact compute the stationary second moments \emph{exactly} for any fixed stepsize $\alpha$,
+because \eqref{eq:quad-2x2} is a linear time-invariant stochastic recursion.
+This subsection makes this computation explicit and shows how the constant in Item~2 emerges from the exact formula.
+
+\paragraph{Step 1: write each eigendirection as a linear state-space model.}
+Fix an eigenvalue $a=a_i$ and denote $(e_k,w_k):=(e_{k,i},w_{k,i})$.
+Introduce $s:=1+\tau$ and define
+\begin{equation*}
+    \begin{aligned}
+        & a_1:=\frac{r\tau}{s},\qquad b_1:=\frac{r}{s},\qquad
+c_1:=\Big(1+\frac{1}{\alpha}\Big)a_1-\frac{1}{\alpha},\\ 
+& d_1:=\Big(1+\frac{1}{\alpha}\Big)b_1,
+    \end{aligned}
+\end{equation*}
+
+so that \eqref{eq:quad-2x2} can be written as
+\[
+\begin{pmatrix} e_{k+1}\\ w_{k+1}\end{pmatrix}
+=
+\underbrace{\begin{pmatrix} a_1 & b_1\\ c_1 & d_1\end{pmatrix}}_{=:M(a,\alpha)}
+\begin{pmatrix} e_{k}\\ w_{k}\end{pmatrix}
++
+\underbrace{r\begin{pmatrix}1\\ 1+\tfrac{1}{\alpha}\end{pmatrix}}_{=:g(a,\alpha)}\,\xi_k,
+%\qquad
+%\E[\xi_k]=0,\quad \Var(\xi_k)=\frac{\alpha\rho^2}{s^2}.
+\]
+with $\E[\xi_k]=0,\Var(\xi_k)=\frac{\alpha\rho^2}{s^2}.$
+Equivalently, with $z_k:=(e_k,w_k)$,
+\begin{equation}\label{eq:quad-state}
+z_{k+1}=M(a,\alpha)\,z_k + g(a,\alpha)\,\xi_k.
+\end{equation}
+
+\paragraph{Step 2: the stationary covariance solves a discrete Lyapunov equation.}
+Assume the recursion is stable (in particular, for large $\alpha$, stability holds since $M(a,\alpha)=O(1/\alpha)$).
+At stationarity, the mean is zero in error coordinates, and the covariance
+\[
+P(a,\alpha):=\E[z_k z_k^\top]
+=
+\begin{pmatrix}
+p_{11} & p_{12}\\
+p_{12} & p_{22}
+\end{pmatrix}
+\]
+satisfies the \emph{discrete Lyapunov equation}
+\begin{equation}\label{eq:quad-lyap}
+\begin{aligned}
+  & P(a,\alpha)=M(a,\alpha)\,P(a,\alpha)\,M(a,\alpha)^\top + Q(a,\alpha), \\
+& Q(a,\alpha):=\Var(\xi_k)\,g(a,\alpha)g(a,\alpha)^\top.  
+\end{aligned}
+\end{equation}
+In particular, the stationary MSE of the coordinate is $\E[e_k^2]=p_{11}$.
+
+\paragraph{Step 3: explicit linear system for the moments.}
+Expanding \eqref{eq:quad-lyap} gives a $3\times 3$ linear system for $(p_{11},p_{12},p_{22})$.
+Writing $M=\begin{psmallmatrix}a_1&b_1\\c_1&d_1\end{psmallmatrix}$ and
+$Q=\begin{psmallmatrix}q_{11}&q_{12}\\q_{12}&q_{22}\end{psmallmatrix}$, one obtains
+\[
+\begin{pmatrix}
+1-a_1^2 & -2a_1b_1 & -b_1^2\\
+-a_1c_1 & 1-(a_1d_1+b_1c_1) & -b_1d_1\\
+-c_1^2 & -2c_1d_1 & 1-d_1^2
+\end{pmatrix}
+\begin{pmatrix}p_{11}\\p_{12}\\p_{22}\end{pmatrix}
+=
+\begin{pmatrix}q_{11}\\q_{12}\\q_{22}\end{pmatrix},
+\]
+where, using $\Var(\xi_k)=\alpha\rho^2/s^2$ and $g=r(1,1+\tfrac1\alpha)^\top$,
+\begin{equation*}
+    \begin{aligned}
+        & q_{11}=\frac{\alpha\rho^2}{s^2}\,r^2,\qquad
+q_{12}=\frac{\alpha\rho^2}{s^2}\,r^2\Big(1+\frac1\alpha\Big),\\
+& q_{22}=\frac{\alpha\rho^2}{s^2}\,r^2\Big(1+\frac1\alpha\Big)^2.
+    \end{aligned}
+\end{equation*}
+
+Thus, for each eigen-direction, the stationary second moments are obtained by solving this explicit $3\times 3$ system.
+
+\paragraph{Step 4: recovering the asymptotic constant.}
+As $\alpha\to\infty$, one has $s=1+\tau\to 1+\mu/\gamma$ and
+\[
+r=\frac{1}{1+\lambda a}
+=\frac{1}{1+\frac{\alpha a}{\gamma s}}
+\sim \frac{\gamma s}{\alpha a},
+\qquad\text{so}\qquad
+\frac{r^2\,\alpha\rho^2}{s^2}\sim \frac{\gamma^2\rho^2}{\alpha a^2}.
+\]
+Moreover, $M(a,\alpha)=O(1/\alpha)$, hence the correction term $M P M^\top$ in \eqref{eq:quad-lyap} is $o(\alpha^{-1})$.
+Therefore $p_{11}=\E[e_\infty^2]\sim q_{11}$, yielding
+\[
+\E[e_{\infty,i}^2]\sim \frac{\gamma^2\rho^2}{\alpha a_i^2},
+\]
+and summing over $i$ recovers Item~2 of Proposition~\ref{prop:quad-explicit}:
+\begin{equation*}
+    \begin{aligned}
+        \alpha\cdot \E\|x_\infty-x^\star\|^2
+\;\to\;
+\rho^2\gamma^2\sum_{i=1}^n \frac{1}{a_i^2}
+=
+\frac{\gamma^2}{n}\,\sigma^2\,\mathrm{tr}(A^{-2}),
+%\quad (\sigma^2=n\rho^2).
+    \end{aligned}
+\end{equation*}
+with $\sigma^2=n\rho^2$. This "exact Lyapunov" viewpoint explains the variance decay mechanism: for large $\alpha$ the linear dynamics matrix $M$ becomes strongly contractive, so the stationary covariance is dominated by the injected noise covariance $Q$, which scales as $1/\alpha$.
+
+\color{black}
+
+
+%\color{black}
+% ===================== Varying stepsizes =====================
+\color{blue}
+\section{Varying stepsizes \texorpdfstring{$\alpha_k$}{alpha\_k} and $\gamma_k$}\label{sec:varying}
+Let $\alpha_k\ge 1$ with $\underline{\alpha}\le \alpha_k\le \overline{\alpha}$, and update $\gamma_k$ via \eqref{eq:v-gamma}.
+Then $\gamma_k\in[\min(\gamma_0,\mu),\max(\gamma_0,\mu)]$ for all $k$.
+
+As in the constant stepsize case, the coupling $v_k=x_k+\frac{1}{\alpha_{k-1}}(x_k-x_{k-1})$ makes the natural recursion two-step.
+We therefore use a one-lag Lyapunov quantity.
+
+\begin{theorem}[Nonasymptotic bound with varying steps]\label{thm:vary}
+There exist constants $G>0$ and $C>0$, depending on $(\mu,L,\underline{\alpha},\overline{\alpha},\gamma_0)$ but not on $k$, such that the Lyapunov sequence
+\[
+V_k \;:=\; \E\|x_k-x^\star\|^2 \;+\; \theta\,\E\|x_{k-1}-x^\star\|^2,
+\qquad
+\theta := \frac{\sqrt{B}}{\underline{\alpha}},
+\]
+satisfies, for all $k\ge 1$,
+\color{blue}
+\begin{equation}\label{eq:Vk-recursion-varying}
+V_{k+1} \;\le\; \frac{G}{\underline{\alpha}}\,V_k \;+\; \frac{C\,\sigma^2}{\alpha_k}.
+\end{equation}
+\color{black}
+
+Consequently, with \textcolor{blue}{$\rho:=G/\underline{\alpha}$}, we have for all $k\ge 1$,
+
+\color{blue}
+\[
+V_k \;\le\; \rho^{k-1}V_1 \;+\; \sum_{t=1}^{k-1}\rho^{k-1-t}\,\frac{C\,\sigma^2}{\alpha_t}.
+\]
+\color{black}
+In particular, \textcolor{blue}{if $\alpha_k \geq \alpha_{\min} >  \underline\alpha > G$}, then
+\color{blue}
+\begin{equation*}
+    \begin{aligned}
+        \limsup_{k\to\infty}\E\|x_k-x^\star\|^2
+& \;\le\;
+\limsup_{k\to\infty}V_k
+\;\le\; \frac{C\,\sigma^2}{\alpha_{\min}(1-\rho)} \\
+&\;=\; \frac{C\,\sigma^2}{\alpha_{\min}\big(1-G/\underline\alpha\big)}.
+    \end{aligned}
+\end{equation*}
+
+\color{black}
+\end{theorem}
+
+\noindent\textbf{Proof idea.}
+The proof follows the same steps as Theorem~\ref{thm:main}, with uniform bounds that hold for all $\alpha_k\in[\underline{\alpha},\overline{\alpha}]$ and all $\gamma_k$ in its invariant interval.
+The constants $A,B$ in the two-step recursion are uniform, and choosing the fixed $\theta=\sqrt{B}/\underline{\alpha}$ yields the one-step bound \eqref{eq:Vk-recursion-varying}.
+
+\color{black}
+
+
+% ===================== Inexact inner solves =====================
+\color{blue}
+\section{Inexact inner solves (LM/Newton)}\label{sec:inexact}
+Let $x_{k+1}=\prox_{\lambda_k f}(c_k+\xi_k)$ denote the exact resolvent point, and let the inner solver return an approximation $\tilde x_{k+1}$.
+
+\paragraph{A simple mean-square perturbation bound.}
+Assume the inner error satisfies $\E\|\tilde x_{k+1}-x_{k+1}\|^2\le \varepsilon_k^2$.
+Then, by $\|a+b\|^2\le 2\|a\|^2+2\|b\|^2$,
+\[
+\E\|\tilde x_{k+1}-x^\star\|^2
+\;\le\;
+2\,\E\|x_{k+1}-x^\star\|^2 \;+\; 2\,\varepsilon_k^2.
+\]
+Therefore, the conclusions of Theorems~\ref{thm:main} and \ref{thm:vary} persist with an additional additive term of order $\varepsilon_k^2$ in the recursion, and the stationary floor becomes
+$O(\sigma^2/\alpha)+O(\sup_k \varepsilon_k^2)$.
+In particular, to preserve the $O(1/\alpha)$ variance decay, it suffices to enforce $\varepsilon_k^2=O(1/\alpha_k)$.
+
+\paragraph{Residual-based stopping, which is implementable.}
+Define the fixed-point residual for the prox equation by
+\[
+g_k(u):=u-(c_k+\xi_k)+\lambda_k\nabla f(u),
+\quad\text{so that}\quad
+g_k(x_{k+1})=0.
+\]
+Since $f$ is $\mu$-strongly convex, $g_k$ is $(1+\lambda_k\mu)$-strongly monotone, hence for any $u$,
+\[
+\|u-x_{k+1}\|
+\;\le\;
+\frac{\|g_k(u)\|}{1+\lambda_k\mu}.
+\]
+Consequently, if the inner solver stops at a point $\tilde x_{k+1}$ such that
+$\E\|g_k(\tilde x_{k+1})\|^2\le \delta_k^2$, then
+\[
+\E\|\tilde x_{k+1}-x_{k+1}\|^2
+\;\le\;
+\frac{\delta_k^2}{(1+\lambda_k\mu)^2}.
+\]
+ Using the same scaling argument as Lemma~\ref{lem:scale}, uniformly over $k$ (since $\gamma_k$ remains in a bounded interval), we have $(1+\lambda_k\mu)^{-2}=O(\alpha_k^{-2})$.
+So even a residual tolerance $\delta_k=O(1)$ yields an inner error $\varepsilon_k^2=O(1/\alpha_k^2)$, which is negligible compared to the intrinsic stochastic floor $O(1/\alpha_k)$.
+\color{black}
+
+% ===================== Mini-batching =====================
+\section{Mini-batching and noise models}
+Averaging $b$ i.i.d.\ samples scales the variance proxy to $\sigma^2/b$. The bounds hold with $\sigma^2\!\to\!\sigma^2/b$,
+giving a stationary noise floor $C\,\sigma^2/(b\,\alpha)$.
+
+% ===================== Algorithms =====================
+\section{Algorithms}\label{sec:algorithms}
+
+We give explicit pseudocode for the fully-implicit outer step (\IRONfi) and for the LM/Newton inner solve used to compute the resolvent point $x_{k+1}=\prox_{\lambda_k f}(c_k+\xi_k)$.
+
+\begin{algorithm}[ht!]
+\caption{\IRONfi: Implicit Resolvent Optimization under Noise (outer loop)}
+\label{alg:ironfi}
+\begin{algorithmic}[1]
+\STATE \textbf{Input:} $x_0\in\R^n$, $v_0\in\R^n$, $\gamma_0>0$, stepsizes $\{\alpha_k\}_{k\ge0}$, strong convexity $\mu$, noise proxy $\sigma^2$, covariance factor $\Sigma^{1/2}$ (often $\sigma I$). 
+\FOR{$k=0,1,2,\dots$}
+  \STATE Update damping: $\displaystyle \gamma_{k+1}=\frac{\gamma_k+\alpha_k\mu}{1+\alpha_k}$.
+  \STATE Define $\displaystyle \tau_k=\frac{1}{\alpha_k}+\frac{\mu}{\gamma_k}$,\quad $\displaystyle \lambda_k=\frac{\alpha_k}{\gamma_k(1+\tau_k)}$.
+  \STATE Center $c_k=\frac{v_k+\tau_k x_k}{1+\tau_k}$.
+  \STATE Sample Brownian increment: $W_{k+1}-W_k=\sqrt{\alpha_k}\,\eta_k$, with $\eta_k\sim\mathcal N(0,I)$.
+  \STATE Center perturbation: $\displaystyle \xi_k=\frac{\Sigma^{1/2}\sqrt{\alpha_k}}{1+\tau_k}\,\eta_k$.
+  \STATE Compute $x_{k+1}$ by approximately solving the resolvent (proximal) subproblem
+  \[
+     x_{k+1} \approx \prox_{\lambda_k f}(c_k+\xi_k)
+     \quad\text{via Alg.~\ref{alg:inner-lm} (LM/Newton).}
+  \]
+  \STATE Update velocity (implicit Euler coupling):
+  \[
+     v_{k+1}=x_{k+1}+\frac{x_{k+1}-x_k}{\alpha_k}.
+  \]
+\ENDFOR
+\end{algorithmic}
+\end{algorithm}
+
+\begin{algorithm}[ht!]
+\caption{LM/Newton inner solve for $x=\prox_{\lambda f}(c)$ (one outer iteration)}
+\label{alg:inner-lm}
+\begin{algorithmic}[1]
+\STATE \textbf{Input:} center $c=c_k+\xi_k$, parameter $\lambda=\lambda_k$, function $f$ with gradient $\nabla f$ and Hessian (or GN approximation) $H(x)$; \textcolor{blue}{residual} tolerance $\varepsilon_k>0$; max iters $N_{\max}$.
+\STATE Define fixed-point residual $g(u)=u-c+\lambda\nabla f(u)$; Jacobian $J(u)=I+\lambda H(u)$.
+\STATE Initialize $u^{(0)}\leftarrow c$ \textit{(or a warm start, e.g., $x_k$ or previous inner iterate)}.
+\FOR{$i=0,1,\dots,N_{\max}$}
+  \STATE Compute $g_i=g(u^{(i)})$; if $\|g_i\|\le \varepsilon_k$ \textbf{return} $x_{k+1}=u^{(i)}$.
+  \STATE (LM/Newton step) Solve $(I+\lambda H(u^{(i)}))\,s^{(i)}=-g_i$ \textit{(direct, or CG on the normal equations / matrix-free Hvps)}.
+  \STATE (Optional damping / trust region) If $\|g(u^{(i)}+s^{(i)})\|>\|g_i\|$, shrink $s^{(i)}\leftarrow\beta s^{(i)}$ with $\beta\in(0,1)$ until decrease holds.
+  \STATE Update $u^{(i+1)}\leftarrow u^{(i)}+s^{(i)}$.
+\ENDFOR
+\STATE \textbf{Return} $x_{k+1}=u^{(N_{\max})}$.
+\end{algorithmic}
+\end{algorithm}
+
+\color{blue}
+\paragraph{Algorithmic considerations (inner solves, scalability, and practical variants).}
+The fully implicit outer step of \IRONfi{} reduces each iteration to computing a resolvent point
+\(
+x_{k+1}=\prox_{\lambda_k f}(c_k+\xi_k),
+\)
+which is the unique root of the fixed-point residual
+\[
+g_k(u)\;:=\;u-(c_k+\xi_k)+\lambda_k\nabla f(u),
+\quad\text{so that}\quad g_k(x_{k+1})=0.
+\]
+In practice, we compute an approximation $\tilde x_{k+1}$ by running a few LM/Newton iterations, each requiring the solution of a linear system
+\[
+\big(I+\lambda_k H(u)\big)s = -g_k(u),
+\]
+where $H(u)$ is either the true Hessian $\nabla^2 f(u)$ (when available) or a Gauss--Newton / Fisher-type curvature approximation. To scale to large problems, these inner systems can be solved \emph{matrix-free} using Krylov methods (CG for SPD models, MINRES/GMRES otherwise), driven by Hessian--vector products; this makes the per-outer-iteration cost essentially proportional to the number of inner Krylov iterations times the cost of an $H(u)$--vector product. Warm-starts are natural and effective: we initialize the inner loop at $u^{(0)}=x_k$ (or reuse the last inner iterate), which substantially reduces inner work when the outer iterates move smoothly.
+
+A key advantage of the resolvent formulation is that it provides an \emph{implementable} and \emph{theory-aligned} stopping rule. Since $f$ is $\mu$-strongly convex, $g_k$ is $(1+\lambda_k\mu)$-strongly monotone, hence
+\[
+\|\tilde x_{k+1}-x_{k+1}\|
+\;\le\;
+\frac{\|g_k(\tilde x_{k+1})\|}{1+\lambda_k\mu}.
+\]
+Therefore, controlling the inner residual directly controls the distance to the exact resolvent point. Combined with the scaling $(1+\lambda_k\mu)^{-2}=O(\alpha_k^{-2})$ (uniformly over $k$ under bounded $\gamma_k$), this implies that even a \emph{moderate} residual tolerance can yield a negligible inner error compared to the intrinsic stochastic floor. Concretely, if the inner solver returns $\tilde x_{k+1}$ such that $\E\|g_k(\tilde x_{k+1})\|^2\le \delta_k^2$ with $\delta_k=O(1)$, then
+\(
+\E\|\tilde x_{k+1}-x_{k+1}\|^2 = O(\alpha_k^{-2}),
+\)
+which is dominated by the $O(1/\alpha_k)$ stationary variance induced by the noise. This observation supports a practical regime in which inner solves are intentionally \emph{inexact} yet do not compromise the $O(1/\alpha_k)$ variance decay.
+
+Finally, several low-cost variants fit naturally within the same framework. One may replace $H(u)$ by a diagonal or block-diagonal surrogate (yielding a cheap LM step), or use a quasi-Newton approximation (e.g., limited-memory updates) inside the same residual-based stopping rule. Another pragmatic option is to perform only one (or a small, fixed number of) LM/Newton steps per outer iteration, which can be viewed as an inexact resolvent evaluation; the above residual-to-error bound then provides a direct diagnostic for when such truncated inner solves remain sufficient.
+
+\color{black}
+
+\section{Numerical experiments}\label{sec:experiments}
+We first illustrate the \IRONfi\ behavior on two toy problems in $\R^3$ respectively in sections~\ref{subsec:SCVX} and \ref{subsec:logcosh}: (i) a strongly convex quadratic (with known minimizer $x^\star$), and (ii) a nonconvex log-cosh regression. In both cases we run $N$ i.i.d.\ particles with constant stepsize $\alpha$ and the $\gamma$ update \eqref{eq:v-gamma}. For each $\alpha\in\{1,10,200,500\}$ we proceed as follows: for the quadratic case we plot the mean error $\|\bar x^k-x^\star\|$ versus iteration $k$ (where $\bar x^k$ is the sample mean) and, at stationarity, the three pairwise coordinate clouds $(x_1,x_2)$, $(x_1,x_3)$, $(x_2,x_3)$. For the nonconvex log-cosh regression, where a global minimizer is not available and multiple basins may exist, we report only the stationary point clouds (three pairwise projections), initializing within a stable basin to examine local behavior. In both settings, the stationary spread tightens markedly as $\alpha$ increases, in line with Theorem~\ref{thm:main}.
+\color{blue}
+Then, we compare in section XX \IRONfi\ behavior with ADAMW and NAG-GS when training a $\ell-2$ regularized logistic regression model for classification tasks. 
+
+\color{black}
+
+
+\subsection{Strongly convex quadratic}\label{subsec:SCVX}
+We take $f(x)=\tfrac12 x^\top A x - b^\top x$ with $A=Q^\top \operatorname{diag}(1,1,3)\,Q$ (orthogonal $Q$) and $b=c\,\mathbf 1$; the minimizer is $x^\star=A^{-1}b$. Each \IRONfi\ step solves
+
+\begin{equation*}
+    \begin{aligned}
+        & x_{k+1}=(I+\lambda A)^{-1}\big(c_k+\xi_k\big),
+\quad
+\lambda=\frac{\alpha}{\gamma(1+\tau)}, \\
+& 
+c_k=\frac{v_k+\tau x_k}{1+\tau},\quad
+\tau=\frac{1}{\alpha}+\frac{\mu}{\gamma},
+    \end{aligned}
+\end{equation*}
+with $\xi_k$ as in~\eqref{eq:xi-var}. We run $N=2\times 10^5$ particles, constant $\alpha\in\{1,10,200,500\}$, and moderate noise level $\sigma$.
+
+\paragraph{Convergence of the mean.}
+For each $\alpha$ we plot the trajectory $k\mapsto \|\bar x^k-x^\star\|$.
+\begin{figure}[ht!]
+  \centering
+
+  \begin{subfigure}[t]{0.48\linewidth}
+    \includegraphics[width=\linewidth]{quad_mean_alpha1.pdf}
+    \caption{$\alpha=1$}
+  \end{subfigure}\hfill
+  \begin{subfigure}[t]{0.48\linewidth}
+    \includegraphics[width=\linewidth]{quad_mean_alpha10.pdf}
+    \caption{$\alpha=10$}
+  \end{subfigure}
+
+  \par\smallskip
+
+  \begin{subfigure}[t]{0.48\linewidth}
+    \includegraphics[width=\linewidth]{quad_mean_alpha200.pdf}
+    \caption{$\alpha=200$}
+  \end{subfigure}\hfill
+  \begin{subfigure}[t]{0.48\linewidth}
+    \includegraphics[width=\linewidth]{quad_mean_alpha500.pdf}
+    \caption{$\alpha=500$}
+  \end{subfigure}
+
+  \caption{Quadratic test: evolution of $\|\bar x^k-x^\star\|$ over iterations for four stepsizes. Larger $\alpha$ yields faster contraction and a lower noise floor, consistent with Theorem~\ref{thm:main}.}
+  \label{fig:quad-mean}
+\end{figure}
+
+
+\paragraph{Stationary clouds.}
+For each value of $\alpha$, Figures~\ref{fig:quad-clouds-2x2} show the three pairwise projections at stationarity.
+
+\begin{figure}[ht!]
+  \centering
+
+  \begin{subfigure}[t]{\linewidth}
+    \includegraphics[width=\linewidth]{figs/quad_clouds_alpha1.pdf}
+    \caption{$\alpha{=}1$}
+  \end{subfigure}
+
+  \begin{subfigure}[t]{\linewidth}
+    \includegraphics[width=\linewidth]{figs/quad_clouds_alpha10.pdf}
+    \caption{$\alpha{=}10$}
+  \end{subfigure}
+
+  \begin{subfigure}[t]{\linewidth}
+    \includegraphics[width=\linewidth]{figs/quad_clouds_alpha200.pdf}
+    \caption{$\alpha{=}200$}
+  \end{subfigure}
+
+  \begin{subfigure}[t]{\linewidth}
+    \includegraphics[width=\linewidth]{figs/quad_clouds_alpha500.pdf}
+    \caption{$\alpha{=}500$}
+  \end{subfigure}
+
+  \caption{Quadratic test: projected point clouds (white = initial, black = final, star = the argmin) for four stepsizes. Each subfigure shows the three coordinate planes \((x_1,x_2), (x_1,x_3), (x_2,x_3)\) in one page. As \(\alpha\) grows, the stationary spread tightens around \(x^\star\), matching the \(O(1/\alpha)\) variance decay.}
+  \label{fig:quad-clouds-2x2}
+\end{figure}
+
+
+\subsection{Nonconvex log-cosh regression}\label{subsec:logcosh}
+We consider
+\begin{equation*}
+    \begin{aligned}
+        & f(x)=\tfrac12\|A\,u(x)-b\|^2,\quad
+u_i(x)=\log\cosh(x_i), \\
+& 
+\nabla f(x)=\big(Q\,u(x)-c\big)\odot \tanh(x),
+    \end{aligned}
+\end{equation*}
+with $Q=A^\top A$ and $c=A^\top b$. We use the fully implicit update $x_{k+1}=c_k-\lambda \nabla f(x_{k+1})$ and solve the inner system by LM/Newton with Jacobian $I+\lambda\nabla^2 f(x_{k+1})$. We initialize near zero and reuse the same $\alpha$ set.
+
+
+
+\begin{figure}[ht!]
+  \centering
+
+  \begin{subfigure}[t]{\linewidth}
+    \includegraphics[width=\linewidth]{logcosh_slices_alpha1.pdf}
+    \caption{$\alpha{=}1$}
+  \end{subfigure}
+
+  \begin{subfigure}[t]{\linewidth}
+    \includegraphics[width=\linewidth]{logcosh_slices_alpha10.pdf}
+    \caption{$\alpha{=}10$}
+  \end{subfigure}
+
+  \begin{subfigure}[t]{\linewidth}
+    \includegraphics[width=\linewidth]{logcosh_slices_alpha200.pdf}
+    \caption{$\alpha{=}200$}
+  \end{subfigure}
+
+  \begin{subfigure}[t]{\linewidth}
+    \includegraphics[width=\linewidth]{logcosh_slices_alpha500.pdf}
+    \caption{$\alpha{=}500$}
+  \end{subfigure}
+
+  \caption{Nonconvex test: projected point clouds (white triangle = initial, pink circle = final) for four stepsizes. Each subfigure contains the three pairwise coordinate clouds \((x_1,x_2), (x_1,x_3), (x_2,x_3)\) for the indicated stepsize. Within the critical points region, the stationary spread tightens as \(\alpha\) increases, though some mass may settle near non-optimal critical points.}
+  \label{fig:nonconvex-clouds}
+\end{figure}
+
+\color{blue}
+\subsection{Strongly convex benchmark: regularized logistic regression}\label{sec:exp-logreg}
+We now test \IRONfi\ on a standard strongly convex learning problem where stochastic gradients arise naturally from mini-batching.
+Our goals are:
+(i) validate the predicted stationary scaling $\E\|x_\infty-x^\star\|^2 = O(1/\alpha)$ under constant stepsize $\alpha$,
+(ii) verify that the inner-solve tolerance does \emph{not} need to shrink with $\alpha$ to retain this $O(1/\alpha)$ floor, and
+(iii) characterize the practical behavior of the LM/TR inner solver (residuals and iteration counts) as $\alpha$ varies.
+
+\paragraph{Problem.}
+We consider ridge-regularized logistic regression
+\[
+f(w)
+:= \frac{1}{n}\sum_{i=1}^n \log\!\big(1+\exp(-y_i a_i^\top w)\big)
++\frac{\lambda}{2}\|w\|^2,
+\]
+with $\lambda>0$ so that $f$ is $\mu$-strongly convex.
+We generate synthetic data $(a_i,y_i)$ with $a_i\sim\mathcal N(0,I_d)$ and labels
+$y_i\in\{-1,+1\}$ sampled from the logistic model.
+A high-accuracy reference minimizer $w^\star$ is computed using a deterministic full-batch solver to tight tolerance.
+
+\paragraph{Stochastic setting and metrics.}
+All stochastic methods use mini-batches of size $b$.
+After a burn-in period, we estimate stationary quantities by averaging over the last $T$ iterates:
+\begin{equation*}
+    \begin{aligned}
+        & \widehat{\mathrm{MSE}}(\alpha) := \frac1T\sum_{k=K_0}^{K_0+T-1}\|w_k-w^\star\|^2,
+\\
+& \widehat{\Delta f}(\alpha) := \frac1T\sum_{k=K_0}^{K_0+T-1}\big(f(w_k)-f(w^\star)\big).
+    \end{aligned}
+\end{equation*}
+
+We repeat over multiple random seeds and report means and variability.
+
+\paragraph{Methods compared.}
+We compare \IRONfi\ to (a) NAG-GS (semi-implicit acceleration), (b) AdamW, and (c) a stochastic proximal-point / implicit SGD-like baseline.
+For \IRONfi, the inner LM/Newton subproblem is terminated when the fixed-point residual satisfies $\|g_k(\tilde w_{k+1})\|\le \varepsilon$.
+A key experiment sweeps $\alpha$ while keeping $\varepsilon$ \emph{fixed}, as suggested by the theory.
+
+\paragraph{What we plot.}
+We report:
+(1) stationary $\widehat{\mathrm{MSE}}(\alpha)$ versus $\alpha$ on log--log axes (expect slope $\approx -1$),
+(2) the effect of inner residual tolerance $\varepsilon$ on the stationary floor,
+(3) inner iteration counts and final residual norms versus $\alpha$,
+and (4) stationary performance comparisons across methods at representative stepsizes.
+
+\color{black}
+
+\noindent\textbf{Reproducibility.} The full Python code (including scripts to regenerate every figure reported here) \textcolor{blue}{is available at "put the link to github repo here"},
+
+% ===================== Relation to prior =====================
+
+
+
+\section{Related works}
+\label{sec:related}
+
+\paragraph{Acceleration and semi-implicit schemes.}
+Semi-implicit acceleration (NAG-GS) couples an explicit gradient with an implicit velocity update, enlarging the stable stepsize regime while retaining fast convergence, yet exhibiting ``critical stepsize'' phenomena under noise \citep{leplat2023naggssemiimplicitacceleratedrobust}. Our fully implicit route takes each outer iteration as a resolvent (Backward--Euler) step of the smooth objective, yielding a contractive map whose shrinkage improves with the implicit parameter.
+
+\paragraph{Implicit/resolvent discretizations.}
+The fully implicit step is the Euclidean resolvent (proximal map) of a smooth strongly convex function, a classical object in monotone operator theory \citep[Ch.~23]{bauschke2017convex}. In the deterministic case, the discrete--continuous dictionary of \citet{wilson2021lyapunov} places Implicit--Euler as a Lyapunov-respecting discretization of accelerated gradient flows; see also the fully implicit ODE viewpoint in \citet{luo2022from}. From numerical analysis, Backward Euler is A-stable \citep{dahlquist1963special,hairer1996sode2}, which helps explain robustness at large steps. Our contribution is to extend this picture to the stochastic regime and quantify how the discretization governs stationary variance.
+
+\paragraph{LM/TR interpretation.}
+Solving the fully implicit fixed point by Newton yields linear systems $(I+\lambda\nabla^2 f)\Delta = r$, i.e., the Levenberg--Marquardt update with a trust-region interpretation \citep{levenberg1944method,marquardt1963algorithm,conn2000trust}. This link is classical; here it serves to interpret the inner linearization of the resolvent step.
+
+\paragraph{Positioning.}
+Compared to semi-implicit acceleration \citep{leplat2023naggssemiimplicitacceleratedrobust}, \IRONfi{} replaces the explicit gradient leg by a resolvent step that is contractive by design. In the deterministic case, our derivation recovers the Implicit--Euler map in the WRJ dictionary \citep{wilson2021lyapunov} and the fully implicit ODE viewpoint of \citet{luo2022from}. Our contribution is to extend this picture to the stochastic regime and to quantify how the discretization controls the stationary variance via a noise-as-center-perturbation mechanism, yielding an $O(1/\alpha)$ contraction and noise floor. This connects to stochastic proximal-point methods \citep{rockafellar1976ppa,juditsky2009rsa,combettes2015sfb,patrascu2018spp,davis2019modelbased}, but differs structurally: classical SPP applies the prox at the current iterate with noise in gradient/subgradient evaluations and variance governed by the parameter schedule, whereas our accelerated SDE derivation yields a centered resolvent with parameters $(\lambda_k,\tau_k)$ tied to the step size and damping, and noise injected at the prox center, producing a product attenuation law and, in the quadratic case, an explicit constant.
+
+
+
+
+
+
+
+
+
+
+
+\section{Conclusion and future work}
+\IRONfi frames stochastic acceleration as resolvent (Backward--Euler) steps with an LM/TR inner linearization. For smooth, strongly convex objectives under unbiased noise, we established a mean-square recursion in which both the contraction factor and the stationary noise floor scale as $1/\alpha$; thus, increasing the step size reduces the stationary variance, which vanishes in the limit provided inner solves are sufficiently accurate. 
+This gives a clear mechanism linking SDE discretization to stationary variance and provides, to our knowledge, the first explanation of the robustness of fully implicit schemes at large steps in the stochastic setting.
+Future directions include: (i) scalable inner solves (matrix-free LM/TR with Hessian--vector products), (ii) robustness to heavy-tailed noise via clipped or robust aggregates with matching theory, (iii) extensions beyond strong convexity (function-value decay in convex settings; K{\L}/PL geometry locally in nonconvex regimes), and (iv) larger-scale empirical studies.
+
+
+
+% ===================== Appendix with full proofs =====================
+\appendix
+\section*{Appendix - Proofs}
+
+\subsection{Proof of Lemma~\ref{lem:resolvent}}\label{app:proof-1}
+\begin{proof}
+$\nabla f$ is $\mu$-strongly monotone; the resolvent of a $\mu$-strongly monotone operator is $1/(1+\lambda\mu)$-Lipschitz
+\citep[Ch.~23]{bauschke2017convex}.
+\end{proof}
+
+\subsection{Proof of Lemma~\ref{lem:vx}}\label{app:proof-2}
+\begin{proof}
+From \eqref{eq:v-gamma}, $v_{k}=x_{k}+\frac{x_k-x_{k-1}}{\alpha}$, so
+\[
+v_k-x^\star=(x_k-x^\star)+\frac{1}{\alpha}(x_k-x_{k-1}).
+\]
+By $(a+b)^2\le 2\|a\|^2+2\|b\|^2$ and $\alpha\ge 1$,
+
+\begin{equation*}
+    \begin{aligned}
+        \|v_k-x^\star\|^2 & \le 2\|x_k-x^\star\|^2+\frac{2}{\alpha^2}\|x_k-x_{k-1}\|^2
+\\
+&\le 2\|x_k-x^\star\|^2+4\|x_k-x^\star\|^2+4\|x_{k-1}-x^\star\|^2,
+    \end{aligned}
+\end{equation*}
+using $\|x_k-x_{k-1}\|^2\le 2\|x_k-x^\star\|^2+2\|x_{k-1}-x^\star\|^2$. This gives the stated $6$ and $4$ constants. The consequence for $\E\mathcal{E}_k$ follows from Lemma~\ref{lem:energy-eq}.
+\end{proof}
+
+\subsection{Proof of Lemma~\ref{lem:scale}}\label{app:proof-3}
+\begin{proof}
+Let $\tau=\frac{1}{\alpha}+\frac{\mu}{\gamma}$ and $\lambda=\frac{\alpha}{\gamma(1+\tau)}$ with $\alpha\ge 1$, $\gamma>0$, $\mu>0$.
+First,
+
+\begin{equation*}
+    \begin{aligned}
+        1+\lambda\mu \;=\; 1+\frac{\alpha\mu}{\gamma(1+\tau)}
+\;& =\; 1+\frac{\alpha\mu}{\gamma\!\left(1+\frac{1}{\alpha}+\frac{\mu}{\gamma}\right)} \\
+& \;\ge\; 1+\frac{\alpha\mu}{\gamma\!\left(2+\frac{\mu}{\gamma}\right)}\\
+& \;\ge\; \frac{\alpha\mu}{\gamma\!\left(2+\frac{\mu}{\gamma}\right)}.
+    \end{aligned}
+\end{equation*}
+Hence
+\[
+\frac{1}{(1+\lambda\mu)^2}
+\;\le\; \Big(\frac{\gamma\!\left(2+\frac{\mu}{\gamma}\right)}{\mu}\Big)^2 \frac{1}{\alpha^2}
+\;=:\; \frac{K_1}{\alpha^2}.
+\]
+Next, since $1+\tau=1+\frac{1}{\alpha}+\frac{\mu}{\gamma}\ge 1+\frac{\mu}{\gamma}$,
+\[
+\frac{1}{(1+\lambda\mu)^2}\cdot \frac{\alpha}{(1+\tau)^2}
+\;\le\; \frac{K_1}{\alpha^2}\cdot \frac{\alpha}{(1+\mu/\gamma)^2}
+\;=\; \frac{K_1}{(1+\mu/\gamma)^2}\cdot \frac{1}{\alpha}.
+\]
+This proves both claims. In particular, the product term scales as $\mathcal{O}(1/\alpha)$.
+\end{proof}
+
+\subsection{Proof of Proposition~\ref{prop:onestep}}\label{app:proof-5}
+\begin{proof}
+By Lemma~\ref{lem:resolvent} and \eqref{eq:proxsub},
+\[
+\norm{x_{k+1}-x^\star} \le \frac{1}{1+\lambda\mu}\,\norm{(c_k-x^\star)+\xi_k}.
+\]
+Square and take conditional expectation; the cross term vanishes since $\E[\xi_k\mid x_k,v_k]=0$:
+\[
+\E\!\left[\norm{x_{k+1}-x^\star}^2\,\middle|\,x_k,v_k\right]
+\le \frac{1}{(1+\lambda\mu)^2}\Big(\norm{c_k-x^\star}^2+\E\norm{\xi_k}^2\Big).
+\]
+Use Lemma~\ref{lem:center} plus $\E\norm{\xi_k}^2\le \frac{\alpha}{(1+\tau)^2}\sigma^2$, and then Lemma~\ref{lem:scale} to get
+
+\begin{equation*}
+    \begin{aligned}
+        \E\!\left[\norm{x_{k+1}-x^\star}^2\,\middle|\,x_k,v_k\right]
+& \le \frac{K'}{\alpha^2}\big(\norm{x_k-x^\star}^2+\norm{v_k-x^\star}^2\big) \\
+& \quad +\frac{\tilde K}{\alpha}\sigma^2.
+    \end{aligned}
+\end{equation*}
+Finally apply Lemma \ref{lem:energy-dom} and take expectations.
+\end{proof}
+
+\subsection{Proof of Theorem~\ref{thm:main}}\label{app:proof-6}
+
+
+\color{blue}
+\begin{proof}
+From Proposition~\ref{prop:onestep},
+\[
+\E\|x_{k+1}-x^\star\|^2
+\;\le\; \frac{C_1}{\alpha^2}\,\E \mathcal{E}_k \;+\; \frac{C_2}{\alpha}\sigma^2.
+\]
+By Lemma~\ref{lem:vx} and Lemma~\ref{lem:energy-eq}, there exists $\bar m_2>0$ such that
+\[
+\E\mathcal{E}_k
+\;\le\; \bar m_2\Big(\E\|x_k-x^\star\|^2 + \E\|x_{k-1}-x^\star\|^2\Big).
+\]
+Hence the two-step recursion holds:
+\begin{equation}\label{eq:two-step-rec}
+\E\|x_{k+1}-x^\star\|^2
+\;\le\; \frac{A}{\alpha^2}\,\E\|x_k-x^\star\|^2
+\;+\; \frac{B}{\alpha^2}\,\E\|x_{k-1}-x^\star\|^2
+\;+\; \frac{C_2}{\alpha}\sigma^2,
+\end{equation}
+where $A,B>0$ depend only on $(\mu,L,\gamma)$.
+
+Define $V_k := \E\|x_k-x^\star\|^2 + \theta\,\E\|x_{k-1}-x^\star\|^2$ with
+$\theta := \sqrt{B}/\alpha$. Then by \eqref{eq:two-step-rec},
+\[
+V_{k+1}
+\le \Big(\theta+\frac{A}{\alpha^2}\Big)\E\|x_k-x^\star\|^2
++ \frac{B}{\alpha^2}\E\|x_{k-1}-x^\star\|^2
++ \frac{C_2}{\alpha}\sigma^2.
+\]
+Set $\lambda := \frac{2\sqrt{B}}{\alpha} + \frac{A}{\alpha^2}$. We have
+$\theta+\frac{A}{\alpha^2} \le \lambda$ and, since $\theta=\sqrt{B}/\alpha$ and $\alpha\ge 1$,
+\[
+\lambda\theta = \frac{2B}{\alpha^2}+\frac{A\sqrt{B}}{\alpha^3}\ge \frac{B}{\alpha^2}.
+\]
+Therefore
+\[
+V_{k+1}\le \lambda\Big(\E\|x_k-x^\star\|^2+\theta\E\|x_{k-1}-x^\star\|^2\Big)+\frac{C_2}{\alpha}\sigma^2
+= \lambda V_k + \frac{C_2}{\alpha}\sigma^2.
+\]
+Finally, for $\alpha\ge 1$,
+\[
+\lambda \le \frac{2\sqrt{B}+A}{\alpha} =: \frac{G}{\alpha},
+\]
+which gives \eqref{eq:Vk-recursion} with $C:=C_2$. Iterating yields the closed form bound, and using $\E\|x_k-x^\star\|^2\le V_k$ concludes.
+\end{proof}
+\color{black}
+
+%\bibliographystyle{aaai2026}
+\bibliography{aaai2026}
+
+\input{checklist}
+
+\end{document}
+
+
+
+

@@ -1,0 +1,10 @@
+# Optional: only for experiments/nonconvex_iron_fi_jax.py
+#
+# JAX requires Python >= 3.10/3.11. Install platform-specific wheels following:
+# https://github.com/google/jax#installation
+#
+# Examples:
+# - Apple Silicon (Metal): pip install -U "jax" "jax-metal"
+# - CPU fallback:          pip install -U "jax[cpu]"
+jax
+jaxlib
