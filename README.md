@@ -114,7 +114,7 @@ python experiments/nonconvex_iron_fi_numpy.py \
 
 ---
 
-## Part A — Synthetic ridge-logistic regression (IRON-only)
+## Synthetic ridge-logistic regression (IRON-only)
 
 This suite validates:
 - stationary MSE scaling \(\widehat{\mathrm{MSE}}(\alpha)\sim 1/\alpha\) (slope close to \(-1\) on log–log),
@@ -138,7 +138,7 @@ Outputs:
 
 ---
 
-## Part B — MNIST softmax regression benchmark (IRON-FI vs NAG-GS vs AdamW)
+## MNIST softmax regression benchmark (IRON-FI vs NAG-GS vs AdamW)
 
 MNIST is downloaded and cached under `data/mnist/` by the loader.
 
