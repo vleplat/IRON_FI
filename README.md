@@ -85,7 +85,7 @@ Generated outputs:
 
 ## Quadratic experiment (paper figure regeneration)
 
-This generates two PDFs per \(\alpha\):
+This generates two PDFs per $\alpha$:
 - `figs/quad_mean_alpha{α}.pdf`
 - `figs/quad_clouds_alpha{α}.pdf`
 
@@ -215,6 +215,13 @@ export IRONFI_ALLOW_INSECURE_SSL=1
 ```
 
 This enables an insecure download fallback and should only be used on trusted networks.
+
+If the MNIST download looks stuck (no output for a long time), enable verbose download logs and/or increase the network timeout:
+
+```bash
+export IRONFI_MNIST_VERBOSE=1
+export IRONFI_MNIST_TIMEOUT_S=120
+```
 
 ---
 
