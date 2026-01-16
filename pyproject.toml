@@ -11,4 +11,4 @@ requires-python = ">=3.9"
 dependencies = ["numpy", "scipy", "matplotlib"]
 
 [tool.setuptools]
-packages = ["ironfi", "ironfi.optimizers", "datasets", "models", "utils", "experiments"]
+packages = ["ironfi", "ironfi.optimizers", "datasets", "models", "utils", "experiments", "plots"]

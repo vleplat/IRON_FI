@@ -1,8 +1,8 @@
 # IRON-FI: Implicit Resolvent Optimization under Noise
 
-This repository contains a paper-consistent implementation of **IRON-FI** (fully implicit resolvent / Backward–Euler discretization) and the experimental suite used in the IRON preprint.
+This repository contains the Python  implementation of **IRON-FI** (fully implicit resolvent / Backward–Euler discretization) and the experimental suite used in the IRON preprint.
 
-Core IRON-FI definitions (matching the paper):
+Core IRON-FI steps:
 - **Center**: $c_k = (v_k + \tau_k x_k)/(1+\tau_k)$
 - **Parameters**: $\tau_k = 1/\alpha_k + \mu/\gamma_k$, $\lambda_k = \alpha_k/(\gamma_k(1+\tau_k))$
 - **Noise as center perturbation**: $\xi_k = (\sqrt{\alpha_k}/(1+\tau_k))\ \sigma\ \eta_k$, $\eta_k\sim\mathcal N(0,I)$
@@ -31,6 +31,13 @@ export MPLCONFIGDIR=$(pwd)/.mplcache
 
 Then run any experiment command in the sections below.
 
+If you hit an import error like `ModuleNotFoundError: No module named 'plots'`, it usually means
+the editable install step was skipped or not run from the repo root. Re-run:
+
+```bash
+pip install -e .
+```
+
 ---
 
 ## Project layout
@@ -38,9 +45,6 @@ Then run any experiment command in the sections below.
 ```
 datasets/
   mnist.py                     # download/cache MNIST into data/mnist/ and load NumPy arrays
-docs/
-  ironfi_paper.tex             # IRON paper draft
-  nag_gs_paper.tex             # NAG-GS paper draft (pseudo-code)
 experiments/
   quad_iron_fi.py              # quadratic IRON-FI (NumPy/SciPy)
   nonconvex_iron_fi_numpy.py   # nonconvex log-cosh IRON-FI (NumPy)
