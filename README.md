@@ -5,7 +5,7 @@ This repository contains a paper-consistent implementation of **IRON-FI** (fully
 Core IRON-FI definitions (matching the paper):
 - **Center**: $c_k = (v_k + \tau_k x_k)/(1+\tau_k)$
 - **Parameters**: $\tau_k = 1/\alpha_k + \mu/\gamma_k$, $\lambda_k = \alpha_k/(\gamma_k(1+\tau_k))$
-- **Noise as center perturbation**: $\xi_k = (\sqrt{\alpha_k}/(1+\tau_k))\,\sigma\,\eta_k$, $\eta_k\sim\mathcal N(0,I)$
+- **Noise as center perturbation**: $\xi_k = (\sqrt{\alpha_k}/(1+\tau_k))\ \sigma\ \eta_k$, $\eta_k\sim\mathcal N(0,I)$
 - **Resolvent step**: $x_{k+1} = \mathrm{prox}_{\lambda_k f}(c_k+\xi_k)$
 - **State updates**: $v_{k+1}=x_{k+1} + (x_{k+1}-x_k)/\alpha_k$, $\gamma_{k+1}=(\gamma_k+\alpha_k\mu)/(1+\alpha_k)$
 
