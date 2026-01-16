@@ -101,7 +101,7 @@ python experiments/quad_iron_fi.py \
 
 ## Nonconvex experiment (NumPy, log-cosh)
 
-This generates (per \(\alpha\)):
+This generates (per $\alpha$):
 - `figs/ncx_numpy_alpha{α}_mean_norm.pdf`
 - `figs/ncx_numpy_alpha{α}_cloud.pdf`
 - `figs/logcosh_slices_alpha{α}.pdf`
@@ -121,9 +121,9 @@ python experiments/nonconvex_iron_fi_numpy.py \
 ## Synthetic ridge-logistic regression (IRON-only)
 
 This suite validates:
-- stationary MSE scaling \(\widehat{\mathrm{MSE}}(\alpha)\sim 1/\alpha\) (slope close to \(-1\) on log–log),
-- tolerance sweep showing \(\varepsilon\) does not need to shrink with \(\alpha\),
-- mean inner LM/Newton iterations vs \(\alpha\).
+- stationary MSE scaling $\widehat{\mathrm{MSE}}(\alpha)\sim 1/\alpha$ (slope close to \(-1\) on log–log),
+- tolerance sweep showing $\varepsilon$ does not need to shrink with $\alpha$,
+- mean inner LM/Newton iterations vs $\alpha$.
 
 ```bash
 python experiments/logreg_synth_ironfi.py \
@@ -176,7 +176,7 @@ python experiments/mnist_softmax_benchmark.py \
   --no-show
 ```
 
-### Grid search (10 epochs) for IRON-FI \(\alpha\)
+### Grid search (10 epochs) for IRON-FI $\alpha$
 
 ```bash
 python experiments/mnist_softmax_benchmark.py \
