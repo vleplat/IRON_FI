@@ -233,20 +233,18 @@ The JAX script (`experiments/nonconvex_iron_fi_jax.py`) mirrors the NumPy noncon
 
 ## 📄 License
 
-This project is licensed under the **CC0 1.0 Universal** license - a public domain dedication that allows you to use, modify, and distribute this software freely for any purpose, including commercial use, without any restrictions.
+This project is licensed under the **MIT License** (see `LICENSE`).
 
-**Key Points:**
+**Key points (MIT):**
 
-- ✅ **Public Domain**: You can use this software for any purpose
-- ✅ **No Attribution Required**: You don't need to credit the original authors
-- ✅ **Commercial Use**: You can use it in commercial projects
-- ✅ **Modification**: You can modify and distribute your changes
-- ✅ **No Warranty**: The software is provided "as-is" without any warranties
-
-**Why CC0?** This license promotes the ideal of a free culture and encourages the further production of creative, cultural, and scientific works by allowing maximum freedom of use and redistribution.
+- ✅ **Use**: you can use this software for any purpose
+- ✅ **Modify & distribute**: you can modify, distribute, and sublicense it
+- ✅ **Commercial use**: permitted
+- ✅ **Attribution**: include the copyright and license notice in copies
+- ✅ **No warranty**: the software is provided "as is"
 
 ## 📧 Support and Contact
 
 For questions, bug reports, or contributions, please contact:
-**v dot leplat [at] innopolis dot ru**
+**valentin dot leplat [at] gmail dot com**
 
