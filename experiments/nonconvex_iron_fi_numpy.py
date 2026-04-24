@@ -1,4 +1,5 @@
 import argparse
+import json
 import os
 import numpy as np
 import matplotlib.pyplot as plt
@@ -97,9 +98,35 @@ def newton_solve(Q: np.ndarray, c: np.ndarray, cxi: np.ndarray, lam: float, x0: 
     return u
 
 
+def _plot_pairwise_clouds(X_ref: np.ndarray, X_last: np.ndarray, X_pool: np.ndarray, plot_lim: float):
+    fig, axs = plt.subplots(2, 3, figsize=(8.2, 5.4), dpi=150)
+    pairs = [(0, 1), (0, 2), (1, 2)]
+    row_titles = ["Last iterate", "Late-time pooled"]
+    targets = [X_last, X_pool]
+    for row, (row_title, target) in enumerate(zip(row_titles, targets)):
+        for ax, (i, j) in zip(axs[row], pairs):
+            ax.plot(X_ref[i], X_ref[j], "x", ms=1, alpha=0.35, label="Initial")
+            ax.plot(target[i], target[j], "o", ms=1, alpha=0.35, label=row_title)
+            ax.set_aspect("equal", "box")
+            ax.grid(True)
+            ax.set_xlim(-plot_lim, plot_lim)
+            ax.set_ylim(-plot_lim, plot_lim)
+            ax.set_title(f"{row_title}: coords ({i+1},{j+1})", fontsize=8)
+            if row == 0:
+                ax.legend(fontsize=7)
+    fig.tight_layout()
+    return fig
+
+
+def _finite_columns(X: np.ndarray) -> np.ndarray:
+    mask = np.all(np.isfinite(X), axis=0)
+    return X[:, mask] if np.any(mask) else X[:, :1].copy()
+
+
 def run_once(nsamples: int, iters: int, alpha_scale: float, sigma: float, seed: int,
              newton_it: int, tol: float, save_figs: bool, no_show: bool,
-             step_cap: float, max_ls: int, clip_x: float, gauss_newton: bool):
+             step_cap: float, max_ls: int, clip_x: float, gauss_newton: bool,
+             plot_lim: float, burn_frac: float, gamma_mode: str):
     rng = np.random.default_rng(seed)
 
     # Problem setup (n=3)
@@ -118,12 +145,15 @@ def run_once(nsamples: int, iters: int, alpha_scale: float, sigma: float, seed: 
     ns = nsamples
     x = rng.normal(size=(n, ns))
     v = np.zeros((n, ns))
+    gamma_init = gamma
 
     res = []
     keep = min(5000, ns)
     X_init = x[:, :keep].copy()
+    burn_start = min(iters - 1, max(0, int(burn_frac * iters)))
+    pooled_samples = []
 
-    for _ in range(iters):
+    for k in range(iters):
         tau = (1.0 / alpha) + (mu / float(gamma))
         lam = alpha / (float(gamma) * (1.0 + tau))
         c_k = (v + tau * x) / (1.0 + tau)
@@ -140,11 +170,15 @@ def run_once(nsamples: int, iters: int, alpha_scale: float, sigma: float, seed: 
         )
         v = (x_next - x) / alpha + x_next
         x = x_next
-        gamma = (gamma + alpha * mu) / (1.0 + alpha)
+        gamma_next = (gamma + alpha * mu) / (1.0 + alpha)
+        gamma = gamma_next if gamma_mode == "updated" else gamma_init
 
         res.append(float(np.linalg.norm(np.mean(x, axis=1))))
+        if k >= burn_start:
+            pooled_samples.append(x[:, :keep].copy())
 
-    X_final = x[:, -keep:].copy()
+    X_last = _finite_columns(x[:, :keep].copy())
+    X_pool = _finite_columns(np.concatenate(pooled_samples, axis=1) if pooled_samples else X_last.copy())
 
     # plots
     fig1 = plt.figure(figsize=(5.5, 3), dpi=150)
@@ -152,7 +186,7 @@ def run_once(nsamples: int, iters: int, alpha_scale: float, sigma: float, seed: 
     plt.grid(True)
     plt.xlabel('Iteration k')
     plt.ylabel(r'$\|\bar x^{(k)}\|_2$')
-    plt.title('Nonconvex IRON-FI (NumPy): mean norm (proxy)')
+    plt.title('Nonconvex IRON-FI (illustrative mean-iterate proxy)')
     if save_figs:
         os.makedirs('figs', exist_ok=True)
         fig1.savefig(f"figs/ncx_numpy_alpha{int(alpha_scale)}_mean_norm.pdf", bbox_inches="tight")
@@ -160,15 +194,7 @@ def run_once(nsamples: int, iters: int, alpha_scale: float, sigma: float, seed: 
         plt.show()
     plt.close(fig1)
 
-    fig2, axs = plt.subplots(1, 3, figsize=(7.5, 2.8), dpi=150)
-    pairs = [(0,1), (0,2), (1,2)]
-    for ax, (i, j) in zip(axs, pairs):
-        ax.plot(X_init[i],  X_init[j],  'x', ms=1, alpha=0.5, label='Initial')
-        ax.plot(X_final[i], X_final[j], 'o', ms=1, alpha=0.5, label='Final')
-        ax.set_aspect('equal', 'box'); ax.grid(True); ax.legend(fontsize=7)
-        ax.set_xlim(-plot_lim, plot_lim); ax.set_ylim(-plot_lim, plot_lim)
-        ax.set_title(f'Coords ({i+1},{j+1})')
-    plt.tight_layout()
+    fig2 = _plot_pairwise_clouds(X_init, X_last, X_pool, plot_lim)
     if save_figs:
         fig2.savefig(f"figs/ncx_numpy_alpha{int(alpha_scale)}_cloud.pdf", bbox_inches="tight")
     if not no_show:
@@ -178,13 +204,29 @@ def run_once(nsamples: int, iters: int, alpha_scale: float, sigma: float, seed: 
     # Objective slices with projected clouds
     if save_figs:
         plot_objective_slices(
-            A, b, X_init, X_final,
+            A, b, X_init, X_pool,
             model='logcosh', x_star=None,
             fixed_strategy='median_final', ngrid=150,
             savepath=f"figs/logcosh_slices_alpha{int(alpha_scale)}.pdf",
             suptitle=None,
             fixed_lim=plot_lim
         )
+
+    summary = {
+        "alpha": float(alpha),
+        "alpha_scale": float(alpha_scale),
+        "sigma": float(sigma),
+        "seed": int(seed),
+        "iters": int(iters),
+        "burn_start": int(burn_start),
+        "gamma_mode": gamma_mode,
+        "pooled_sample_count": int(X_pool.shape[1]),
+        "late_mean_norm_proxy": float(np.mean(res[burn_start:])),
+    }
+    if save_figs:
+        os.makedirs("logs", exist_ok=True)
+        with open(os.path.join("logs", f"nonconvex_alpha{int(alpha_scale)}_seed{seed}.json"), "w", encoding="utf-8") as f:
+            json.dump(summary, f, indent=2, sort_keys=True)
 
 
 def main():
@@ -200,18 +242,19 @@ def main():
     parser.add_argument('--max-ls', type=int, default=8)
     parser.add_argument('--clip-x', type=float, default=30.0)
     parser.add_argument('--plot-lim', type=float, default=15.0)
+    parser.add_argument('--burn-frac', type=float, default=0.5)
+    parser.add_argument('--gamma-mode', choices=['fixed', 'updated'], default='updated')
     parser.add_argument('--gauss-newton', action='store_true')
     parser.add_argument('--save-figs', action='store_true')
     parser.add_argument('--no-show', action='store_true')
     args = parser.parse_args()
 
     for s in args.alpha_scale:
-        global plot_lim
-        plot_lim = float(args.plot_lim)
         run_once(
             args.nsamples, args.iters, s, args.sigma, args.seed,
             args.newton_it, args.tol, args.save_figs, args.no_show,
             args.step_cap, args.max_ls, args.clip_x, args.gauss_newton,
+            float(args.plot_lim), args.burn_frac, args.gamma_mode,
         )
 
 

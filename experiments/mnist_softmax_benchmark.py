@@ -28,6 +28,20 @@ def make_fake_mnist(rng: np.random.Generator, n_train=6000, n_test=1000, d=784, 
     return Xtr, ytr, Xte, yte
 
 
+def stratified_train_val_split(X: np.ndarray, y: np.ndarray, val_frac: float, seed: int):
+    rng = np.random.default_rng(seed)
+    train_idx, val_idx = [], []
+    for cls in np.unique(y):
+        cls_idx = np.where(y == cls)[0]
+        cls_idx = rng.permutation(cls_idx)
+        n_val = max(1, int(round(val_frac * cls_idx.size)))
+        val_idx.append(cls_idx[:n_val])
+        train_idx.append(cls_idx[n_val:])
+    train_idx = rng.permutation(np.concatenate(train_idx))
+    val_idx = rng.permutation(np.concatenate(val_idx))
+    return X[train_idx], y[train_idx], X[val_idx], y[val_idx]
+
+
 def run_adamw(
     *,
     Xtr,
@@ -250,6 +264,8 @@ def main():
     p.add_argument("--tune-ironfi", action="store_true")
     p.add_argument("--tune-epochs", type=int, default=5)
     p.add_argument("--ironfi-alpha-grid", type=float, nargs="+", default=None)
+    p.add_argument("--val-frac", type=float, default=0.1)
+    p.add_argument("--split-seed", type=int, default=123)
 
     # NAG-GS
     p.add_argument("--naggs-alpha", type=float, default=0.5)
@@ -275,17 +291,23 @@ def main():
 
     rng = np.random.default_rng(args.seed)
     if args.fake_data:
-        Xtr, ytr, Xte, yte = make_fake_mnist(rng)
+        Xtr_full, ytr_full, Xte, yte = make_fake_mnist(rng)
     else:
-        Xtr, ytr, Xte, yte = load_mnist(args.data_dir, download=args.download, flatten=True, normalize=True)
+        Xtr_full, ytr_full, Xte, yte = load_mnist(args.data_dir, download=args.download, flatten=True, normalize=True)
+
+    Xtr_tune, ytr_tune, Xval, yval = stratified_train_val_split(Xtr_full, ytr_full, args.val_frac, args.split_seed)
 
     config = vars(args)
+    config["train_size_full"] = int(Xtr_full.shape[0])
+    config["train_size_tune"] = int(Xtr_tune.shape[0])
+    config["val_size"] = int(Xval.shape[0])
+    config["test_size"] = int(Xte.shape[0])
     run_dir = make_run_dir("logs", args.run_prefix, config)
     os.makedirs("figs", exist_ok=True)
 
     curves_adamw = run_adamw(
-        Xtr=Xtr,
-        ytr=ytr,
+        Xtr=Xtr_full,
+        ytr=ytr_full,
         Xte=Xte,
         yte=yte,
         reg=args.reg,
@@ -297,8 +319,8 @@ def main():
         run_dir=run_dir,
     )
     curves_naggs = run_naggs(
-        Xtr=Xtr,
-        ytr=ytr,
+        Xtr=Xtr_full,
+        ytr=ytr_full,
         Xte=Xte,
         yte=yte,
         reg=args.reg,
@@ -317,10 +339,10 @@ def main():
         best_acc = -1.0
         for a in grid:
             curves_tmp = run_ironfi(
-                Xtr=Xtr,
-                ytr=ytr,
-                Xte=Xte,
-                yte=yte,
+                Xtr=Xtr_tune,
+                ytr=ytr_tune,
+                Xte=Xval,
+                yte=yval,
                 reg=args.reg,
                 epochs=args.tune_epochs,
                 batch_size=args.batch_size,
@@ -339,11 +361,11 @@ def main():
                 best_acc = acc
                 best_alpha = a
         ironfi_alpha = float(best_alpha)
-        print(f"[tune] selected IRON-FI alpha={ironfi_alpha:g} (tune_epochs={args.tune_epochs}, acc={best_acc:.4f})")
+        print(f"[tune] selected IRON-FI alpha={ironfi_alpha:g} (tune_epochs={args.tune_epochs}, val_acc={best_acc:.4f})")
 
     curves_ironfi = run_ironfi(
-        Xtr=Xtr,
-        ytr=ytr,
+        Xtr=Xtr_full,
+        ytr=ytr_full,
         Xte=Xte,
         yte=yte,
         reg=args.reg,

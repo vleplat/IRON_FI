@@ -30,8 +30,10 @@ def f_quadratic(x, A, b):
 def f_logcosh(x, A, b):
     # u = logcosh(x) elementwise
     u = logcosh_stable(x)
-    r = A @ u.T - b[:, None]
-    return 0.5 * np.sum(r * r, axis=0)
+    with np.errstate(over='ignore', divide='ignore', invalid='ignore', under='ignore'):
+        r = A @ u.T - b[:, None]
+        vals = 0.5 * np.sum(r * r, axis=0)
+    return np.nan_to_num(vals, nan=1e6, posinf=1e6, neginf=1e6)
 
 # ---------- Grid & plotting ----------
 

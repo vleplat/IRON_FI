@@ -11,6 +11,14 @@ from utils.expio import append_csv_row, make_run_dir
 from utils.plotting import savefig
 
 
+def mean_std_ci(x: np.ndarray) -> dict[str, float]:
+    x = np.asarray(x, dtype=float)
+    mean = float(np.mean(x))
+    std = float(np.std(x, ddof=1)) if x.size > 1 else 0.0
+    ci95 = float(1.96 * std / np.sqrt(x.size)) if x.size > 1 else 0.0
+    return {"mean": mean, "std": std, "ci95": ci95, "n": int(x.size)}
+
+
 def sigmoid(t: np.ndarray) -> np.ndarray:
     """Numerically stable sigmoid."""
     # For t >= 0: 1/(1+exp(-t)) is safe
@@ -89,13 +97,14 @@ def run_single(
     *,
     alpha: float,
     inner_tol: float,
+    run_seed: int,
     args,
     X: np.ndarray,
     y: np.ndarray,
     w_hat_star: np.ndarray,
     rng: np.random.Generator,
     run_dir: str,
-) -> tuple[float, float]:
+) -> dict[str, float]:
     d = X.shape[1]
     mu = args.reg
     gamma = float(np.sqrt(mu))
@@ -109,9 +118,9 @@ def run_single(
     inner_it_count = 0
     t_start = time.time()
 
-    metrics_path = os.path.join(run_dir, f"metrics_alpha{alpha:g}_tol{inner_tol:g}.csv")
+    metrics_path = os.path.join(run_dir, f"metrics_seed{run_seed}_alpha{alpha:g}_tol{inner_tol:g}.csv")
     header = [
-        "k", "alpha", "tol", "loss", "mse",
+        "k", "seed", "alpha", "tol", "loss", "mse",
         "inner_newton", "inner_res", "inner_success",
         "elapsed_s",
     ]
@@ -141,6 +150,7 @@ def run_single(
             metrics_path,
             {
                 "k": k,
+                "seed": run_seed,
                 "alpha": alpha,
                 "tol": inner_tol,
                 "loss": fval,
@@ -161,7 +171,15 @@ def run_single(
 
     mse_hat = mse_sum / max(1, mse_count)
     inner_it_hat = inner_it_sum / max(1, inner_it_count)
-    return mse_hat, inner_it_hat
+    return {
+        "seed": int(run_seed),
+        "alpha": float(alpha),
+        "tol": float(inner_tol),
+        "burn_start": int(burn),
+        "stationary_window": int(max(0, args.iters - burn)),
+        "stationary_mse": float(mse_hat),
+        "stationary_inner_newton": float(inner_it_hat),
+    }
 
 
 def main():
@@ -171,6 +189,7 @@ def main():
     parser.add_argument("--reg", type=float, default=1e-2)
     parser.add_argument("--sigma", type=float, default=1.0)
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--seeds", type=int, nargs="+", default=[0, 1, 2, 3, 4])
     parser.add_argument("--iters", type=int, default=1000)
     parser.add_argument("--burn-frac", type=float, default=0.3)
     parser.add_argument("--inner-max-it", type=int, default=20)
@@ -184,76 +203,151 @@ def main():
     rng = np.random.default_rng(args.seed)
     X, y, w_true = make_synth_logreg(rng, args.n, args.d, w_scale=1.0)
     w_hat_star = solve_w_hat_star(X, y, args.reg)
+    burn = int(args.burn_frac * args.iters)
+    stationarity_window = max(0, args.iters - burn)
 
     config = {
         "n": args.n,
         "d": args.d,
         "reg": args.reg,
         "sigma": args.sigma,
-        "seed": args.seed,
+        "dataset_seed": args.seed,
+        "run_seeds": args.seeds,
         "iters": args.iters,
         "burn_frac": args.burn_frac,
+        "burn_start": burn,
+        "stationarity_window": stationarity_window,
         "inner_max_it": args.inner_max_it,
         "alpha_grid": args.alpha_grid,
         "tol_grid": args.tol_grid,
+        "slope_fit_min_alpha": args.slope_fit_min_alpha,
     }
     run_dir = make_run_dir("logs", args.run_prefix, config)
 
-    results: dict[str, list[tuple[float, float, float]]] = {}
+    raw_results: dict[str, dict[str, list[dict[str, float]]]] = {}
     for tol in args.tol_grid:
-        results[str(tol)] = []
+        raw_results[str(tol)] = {}
         for alpha in args.alpha_grid:
-            cond_rng = np.random.default_rng(args.seed + 1000 + int(10_000 * alpha) + int(1e6 * tol))
-            mse_hat, inner_it_hat = run_single(
-                alpha=alpha,
-                inner_tol=tol,
-                args=args,
-                X=X,
-                y=y,
-                w_hat_star=w_hat_star,
-                rng=cond_rng,
-                run_dir=run_dir,
-            )
-            results[str(tol)].append((alpha, mse_hat, inner_it_hat))
+            raw_results[str(tol)][str(alpha)] = []
+            for run_seed in args.seeds:
+                cond_rng = np.random.default_rng(
+                    args.seed + 1000 * (run_seed + 1) + int(10_000 * alpha) + int(1e6 * tol)
+                )
+                raw_results[str(tol)][str(alpha)].append(
+                    run_single(
+                        alpha=alpha,
+                        inner_tol=tol,
+                        run_seed=run_seed,
+                        args=args,
+                        X=X,
+                        y=y,
+                        w_hat_star=w_hat_star,
+                        rng=cond_rng,
+                        run_dir=run_dir,
+                    )
+                )
 
+    aggregated_results: dict[str, list[dict[str, object]]] = {}
+    per_seed_slopes: dict[str, list[dict[str, object]]] = {}
+    seed_to_index = {seed: idx for idx, seed in enumerate(args.seeds)}
+    for tol in args.tol_grid:
+        tol_key = str(tol)
+        aggregated_results[tol_key] = []
+        per_seed_slopes[tol_key] = []
+        for alpha in args.alpha_grid:
+            entries = raw_results[tol_key][str(alpha)]
+            mse_vals = np.array([entry["stationary_mse"] for entry in entries], dtype=float)
+            inner_vals = np.array([entry["stationary_inner_newton"] for entry in entries], dtype=float)
+            aggregated_results[tol_key].append(
+                {
+                    "alpha": float(alpha),
+                    "mse": mean_std_ci(mse_vals),
+                    "inner_newton": mean_std_ci(inner_vals),
+                    "scaled_mse": mean_std_ci(float(alpha) * mse_vals),
+                }
+            )
+
+        for run_seed in args.seeds:
+            alpha_vals = np.array(args.alpha_grid, dtype=float)
+            mse_vals = np.array(
+                [
+                    raw_results[tol_key][str(alpha)][seed_to_index[run_seed]]["stationary_mse"]
+                    for alpha in args.alpha_grid
+                ],
+                dtype=float,
+            )
+            mask = (alpha_vals >= float(args.slope_fit_min_alpha)) & (mse_vals > 0) & np.isfinite(mse_vals)
+            if int(np.sum(mask)) >= 2:
+                slope = float(np.polyfit(np.log(alpha_vals[mask]), np.log(mse_vals[mask]), deg=1)[0])
+                per_seed_slopes[tol_key].append(
+                    {
+                        "seed": int(run_seed),
+                        "slope": slope,
+                        "alpha_used": alpha_vals[mask].tolist(),
+                    }
+                )
+
+    best_tol = min(args.tol_grid)
+    best_tol_key = str(best_tol)
+    slope_vals = np.array([item["slope"] for item in per_seed_slopes[best_tol_key]], dtype=float)
+    slope_stats = mean_std_ci(slope_vals) if slope_vals.size else {"mean": float("nan"), "std": float("nan"), "ci95": float("nan"), "n": 0}
+
+    tolerance_breakdown = {}
+    best_scaled_lookup = {entry["alpha"]: entry["scaled_mse"]["mean"] for entry in aggregated_results[best_tol_key]}
+    for tol in args.tol_grid:
+        tol_key = str(tol)
+        rel_diffs = []
+        for entry in aggregated_results[tol_key]:
+            baseline = best_scaled_lookup[entry["alpha"]]
+            rel_diffs.append(
+                float(abs(entry["scaled_mse"]["mean"] - baseline) / max(abs(baseline), 1e-12))
+            )
+        tolerance_breakdown[tol_key] = {
+            "max_relative_scaled_mse_deviation_vs_best_tol": float(max(rel_diffs) if rel_diffs else 0.0),
+            "keeps_near_constant_scaled_mse": bool(max(rel_diffs) <= 0.1 if rel_diffs else True),
+        }
+
+    summary_payload = {
+        "config": config,
+        "aggregated_results": aggregated_results,
+        "raw_results": raw_results,
+        "per_seed_slopes": per_seed_slopes,
+        "slope_stats_best_tol": {
+            "best_tol": float(best_tol),
+            "slope_fit_min_alpha": float(args.slope_fit_min_alpha),
+            **slope_stats,
+        },
+        "tolerance_breakdown": tolerance_breakdown,
+    }
     with open(os.path.join(run_dir, "summary.json"), "w", encoding="utf-8") as f:
-        json.dump(results, f, indent=2, sort_keys=True)
+        json.dump(summary_payload, f, indent=2, sort_keys=True)
 
     os.makedirs("figs", exist_ok=True)
 
     # Plot 1: stationary MSE vs alpha (best tol)
-    best_tol = min(args.tol_grid)
-    arr = results[str(best_tol)]
-    alpha_vals = np.array([t[0] for t in arr], dtype=float)
-    mse_vals = np.array([t[1] for t in arr], dtype=float)
-
-    # Log-log slope fit: log(MSE) ≈ a + b log(alpha)  => b ~ -1
-    mask = (alpha_vals >= float(args.slope_fit_min_alpha)) & (mse_vals > 0) & np.isfinite(mse_vals)
-    slope = float("nan")
-    if int(np.sum(mask)) >= 2:
-        slope = float(np.polyfit(np.log(alpha_vals[mask]), np.log(mse_vals[mask]), deg=1)[0])
-    print(f"[slope] best_tol={best_tol:g}, fit alpha>= {args.slope_fit_min_alpha:g}: slope={slope:.3f}")
+    arr = aggregated_results[best_tol_key]
+    alpha_vals = np.array([entry["alpha"] for entry in arr], dtype=float)
+    mse_mean = np.array([entry["mse"]["mean"] for entry in arr], dtype=float)
+    mse_ci = np.array([entry["mse"]["ci95"] for entry in arr], dtype=float)
+    print(
+        f"[slope] best_tol={best_tol:g}, fit alpha>= {args.slope_fit_min_alpha:g}: "
+        f"mean={slope_stats['mean']:.3f} +/- {slope_stats['ci95']:.3f} (95% CI, n={slope_stats['n']})"
+    )
 
     with open(os.path.join(run_dir, "slopes.json"), "w", encoding="utf-8") as f:
-        json.dump(
-            {
-                "best_tol": float(best_tol),
-                "slope_fit_min_alpha": float(args.slope_fit_min_alpha),
-                "slope": slope,
-                "alpha_used": alpha_vals[mask].tolist(),
-            },
-            f,
-            indent=2,
-            sort_keys=True,
-        )
+        json.dump(summary_payload["slope_stats_best_tol"], f, indent=2, sort_keys=True)
 
     fig, ax = plt.subplots(1, 1, figsize=(5.2, 3.2), dpi=150)
-    ax.loglog(alpha_vals, mse_vals, "o-", label=f"tol={best_tol:g}")
-    if np.isfinite(slope):
+    ax.loglog(alpha_vals, mse_mean, "o-", label=f"tol={best_tol:g}")
+    ax.fill_between(alpha_vals, np.maximum(mse_mean - mse_ci, 1e-12), mse_mean + mse_ci, alpha=0.2)
+    if np.isfinite(slope_stats["mean"]):
         ax.text(
             0.05,
             0.05,
-            f"slope≈{slope:.2f} (alpha≥{args.slope_fit_min_alpha:g})",
+            (
+                f"slope≈{slope_stats['mean']:.2f} +/- {slope_stats['ci95']:.2f}\n"
+                f"(alpha≥{args.slope_fit_min_alpha:g}, 95% CI)"
+            ),
             transform=ax.transAxes,
             fontsize=9,
             bbox=dict(boxstyle="round,pad=0.25", fc="white", ec="gray", alpha=0.8),
@@ -271,10 +365,12 @@ def main():
     # Plot 2: tolerance effect
     fig, ax = plt.subplots(1, 1, figsize=(5.2, 3.2), dpi=150)
     for tol in args.tol_grid:
-        arr = results[str(tol)]
-        a = np.array([t[0] for t in arr], dtype=float)
-        mse = np.array([t[1] for t in arr], dtype=float)
+        arr = aggregated_results[str(tol)]
+        a = np.array([entry["alpha"] for entry in arr], dtype=float)
+        mse = np.array([entry["mse"]["mean"] for entry in arr], dtype=float)
+        ci = np.array([entry["mse"]["ci95"] for entry in arr], dtype=float)
         ax.loglog(a, mse, "o-", label=f"tol={tol:g}")
+        ax.fill_between(a, np.maximum(mse - ci, 1e-12), mse + ci, alpha=0.15)
     ax.grid(True, which="both", ls="--", alpha=0.4)
     ax.set_xlabel(r"$\alpha$")
     ax.set_ylabel("stationary MSE")
@@ -288,16 +384,37 @@ def main():
     # Plot 3: mean inner iterations vs alpha
     fig, ax = plt.subplots(1, 1, figsize=(5.2, 3.2), dpi=150)
     for tol in args.tol_grid:
-        arr = results[str(tol)]
-        a = np.array([t[0] for t in arr], dtype=float)
-        itmean = np.array([t[2] for t in arr], dtype=float)
+        arr = aggregated_results[str(tol)]
+        a = np.array([entry["alpha"] for entry in arr], dtype=float)
+        itmean = np.array([entry["inner_newton"]["mean"] for entry in arr], dtype=float)
+        ci = np.array([entry["inner_newton"]["ci95"] for entry in arr], dtype=float)
         ax.semilogx(a, itmean, "o-", label=f"tol={tol:g}")
+        ax.fill_between(a, np.maximum(itmean - ci, 0.0), itmean + ci, alpha=0.15)
     ax.grid(True, which="both", ls="--", alpha=0.4)
     ax.set_xlabel(r"$\alpha$")
     ax.set_ylabel("mean inner Newton iters (stationary)")
     ax.set_title("Synthetic logreg: inner cost vs alpha (IRON-FI)")
     ax.legend()
     savefig("figs/synth_logreg_inner_iters_vs_alpha.pdf")
+    if not args.no_show:
+        plt.show()
+    plt.close(fig)
+
+    # Plot 4: scaled MSE vs alpha to expose where fixed inner tolerances break the 1/alpha trend
+    fig, ax = plt.subplots(1, 1, figsize=(5.2, 3.2), dpi=150)
+    for tol in args.tol_grid:
+        arr = aggregated_results[str(tol)]
+        a = np.array([entry["alpha"] for entry in arr], dtype=float)
+        scaled = np.array([entry["scaled_mse"]["mean"] for entry in arr], dtype=float)
+        ci = np.array([entry["scaled_mse"]["ci95"] for entry in arr], dtype=float)
+        ax.semilogx(a, scaled, "o-", label=f"tol={tol:g}")
+        ax.fill_between(a, np.maximum(scaled - ci, 0.0), scaled + ci, alpha=0.15)
+    ax.grid(True, which="both", ls="--", alpha=0.4)
+    ax.set_xlabel(r"$\alpha$")
+    ax.set_ylabel(r"$\alpha \cdot$ stationary MSE")
+    ax.set_title("Synthetic logreg: scaled MSE vs alpha")
+    ax.legend()
+    savefig("figs/synth_logreg_scaled_mse_vs_alpha.pdf")
     if not args.no_show:
         plt.show()
     plt.close(fig)

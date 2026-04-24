@@ -1,6 +1,6 @@
 # IRON-FI: Implicit Resolvent Optimization under Noise
 
-This repository contains the Python  implementation of **IRON-FI** (fully implicit resolvent / Backward–Euler discretization) and the experimental suite used in the IRON preprint.
+This repository contains the Python implementation of **IRON-FI** (fully implicit resolvent / Backward–Euler discretization) and the experimental suite used in the IRON preprint.
 
 Core IRON-FI steps:
 - **Center**: $c_k = (v_k + \tau_k x_k)/(1+\tau_k)$
@@ -46,13 +46,13 @@ pip install -e .
 datasets/
   mnist.py                     # download/cache MNIST into data/mnist/ and load NumPy arrays
 experiments/
-  quad_iron_fi.py              # quadratic IRON-FI (NumPy/SciPy)
-  nonconvex_iron_fi_numpy.py   # nonconvex log-cosh IRON-FI (NumPy)
+  quad_iron_fi.py              # quadratic IRON-FI + stationary MSE / Lyapunov validation
+  nonconvex_iron_fi_numpy.py   # qualitative nonconvex log-cosh IRON-FI (NumPy)
   nonconvex_iron_fi_jax.py     # nonconvex log-cosh IRON-FI (JAX prototype)
-  logreg_synth_ironfi.py       # Part A: synthetic ridge-logistic regression (IRON-only)
-  mnist_softmax_benchmark.py   # Part B: single-run MNIST benchmark + optional alpha tuning
-  mnist_softmax_journal.py     # Part B: multi-seed journal runner (mean±std + averaged curves)
-  mnist_softmax_core.py        # shared training loops for Part B runners
+  logreg_synth_ironfi.py       # Part A: synthetic ridge-logistic regression (IRON-only, multi-seed)
+  mnist_softmax_benchmark.py   # Part B: single-run exploratory MNIST benchmark
+  mnist_softmax_journal.py     # Part B: validation-tuned multi-seed MNIST runner
+  mnist_softmax_core.py        # shared train/val/test training loops for Part B runners
 ironfi/
   resolvent.py                 # quadratic resolvent step helper
   ironfi.py                    # generic IRON-FI outer step (vector case, explicit center noise)
@@ -85,9 +85,18 @@ Generated outputs:
 
 ## Quadratic experiment (paper figure regeneration)
 
-This generates two PDFs per $\alpha$:
-- `figs/quad_mean_alpha{α}.pdf`
-- `figs/quad_clouds_alpha{α}.pdf`
+This script now serves two purposes:
+- validate the theorem-facing quadratic quantity
+  \[
+  \widehat{\mathrm{MSE}}_k=\frac1N\sum_{j=1}^N \|x_k^{(j)}-x^\star\|^2
+  \]
+  together with its bias/variance decomposition
+  \[
+  \widehat{\mathrm{MSE}}_k=\|\bar x_k-x^\star\|^2+\mathrm{tr}\!\big(\widehat{\mathrm{Cov}}(x_k)\big),
+  \]
+- check the stationary quadratic prediction by plotting $\alpha\,\widehat{\mathrm{MSE}}_\infty$ against $\alpha$ and comparing it with the exact discrete-Lyapunov stationary MSE and the asymptotic constant \(C_{\mathrm{quad}}\).
+
+Running
 
 ```bash
 python experiments/quad_iron_fi.py \
@@ -97,14 +106,34 @@ python experiments/quad_iron_fi.py \
   --save-figs --no-show
 ```
 
+generates, for each $\alpha$:
+- `figs/quad_mean_alpha{α}.pdf`
+- `figs/quad_clouds_alpha{α}.pdf`
+
+and also:
+- `figs/quad_stationary_scaled_mse.pdf`
+- `logs/quad_iron_fi_summary_seed<seed>.json`
+
+Interpretation of the outputs:
+- `quad_mean_alpha{α}.pdf`: ensemble MSE, squared bias, covariance trace, and mean error over iterations.
+- `quad_clouds_alpha{α}.pdf`: qualitative projected particle clouds (initial vs late-time final state).
+- `quad_stationary_scaled_mse.pdf`: empirical \(\alpha\,\widehat{\mathrm{MSE}}_\infty\), exact Lyapunov \(\alpha\,\mathrm{MSE}_\infty\), and the asymptotic constant \(C_{\mathrm{quad}}\).
+
+Notes:
+- The stationary-constant validation is done in the fixed-\(\gamma\) setting (`--gamma-mode fixed`), which is the default and matches the exact Lyapunov formula used in the script.
+- The cloud figures are intentionally qualitative; the main quantitative comparison to theory is carried by `quad_mean_alpha*.pdf` and `quad_stationary_scaled_mse.pdf`.
+
 ---
 
 ## Nonconvex experiment (NumPy, log-cosh)
 
-This generates (per $\alpha$):
-- `figs/ncx_numpy_alpha{α}_mean_norm.pdf`
-- `figs/ncx_numpy_alpha{α}_cloud.pdf`
-- `figs/logcosh_slices_alpha{α}.pdf`
+This script is intended as a **qualitative / illustrative** nonconvex experiment, not as a theorem-validation figure.
+It now distinguishes:
+- a last-iterate cloud,
+- a pooled late-time cloud after burn-in,
+- and objective-slice overlays built from the pooled late-time samples.
+
+Running
 
 ```bash
 python experiments/nonconvex_iron_fi_numpy.py \
@@ -116,6 +145,24 @@ python experiments/nonconvex_iron_fi_numpy.py \
   --save-figs --no-show
 ```
 
+generates (per $\alpha$):
+- `figs/ncx_numpy_alpha{α}_mean_norm.pdf`
+- `figs/ncx_numpy_alpha{α}_cloud.pdf`
+- `figs/logcosh_slices_alpha{α}.pdf`
+
+and:
+- `logs/nonconvex_alpha{α}_seed<seed>.json`
+
+Interpretation of the outputs:
+- `ncx_numpy_alpha{α}_mean_norm.pdf`: mean-iterate norm proxy only; this is not a theorem-level quantity.
+- `ncx_numpy_alpha{α}_cloud.pdf`: top row = last-iterate projected clouds, bottom row = pooled late-time projected clouds after burn-in.
+- `logcosh_slices_alpha{α}.pdf`: objective slices with projected late-time clouds.
+
+Notes:
+- The default `--burn-frac 0.5` means the pooled cloud uses the last half of the run.
+- The default `--gamma-mode updated` matches the toy experiment narrative used elsewhere in the repository.
+- If the contour layers near minima are visually too compressed, adjust the contour scaling in `plots/slices.py`; the script is designed for qualitative inspection rather than exact quantitative matching.
+
 ---
 
 ## Synthetic ridge-logistic regression (IRON-only)
@@ -123,13 +170,16 @@ python experiments/nonconvex_iron_fi_numpy.py \
 This suite validates:
 - stationary MSE scaling $\widehat{\mathrm{MSE}}(\alpha)\sim 1/\alpha$ (slope close to \(-1\) on log–log),
 - tolerance sweep showing $\varepsilon$ does not need to shrink with $\alpha$,
-- mean inner LM/Newton iterations vs $\alpha$.
+- mean inner LM/Newton iterations vs $\alpha$,
+- confidence intervals on the fitted slope across seeds,
+- scaled-MSE diagnostics to show when a tolerance breaks the \(1/\alpha\) trend.
 
 ```bash
 python experiments/logreg_synth_ironfi.py \
   --n 20000 --d 50 --iters 1000 --burn-frac 0.3 \
   --alpha-grid 1 2 5 10 20 50 100 200 \
   --tol-grid 1e-2 1e-4 1e-6 \
+  --seeds 0 1 2 3 4 \
   --sigma 1.0 --reg 1e-2 --seed 0 \
   --slope-fit-min-alpha 5 \
   --no-show
@@ -139,6 +189,9 @@ Outputs:
 - `figs/synth_logreg_mse_vs_alpha_tol<best>.pdf`
 - `figs/synth_logreg_tol_effect.pdf`
 - `figs/synth_logreg_inner_iters_vs_alpha.pdf`
+- `figs/synth_logreg_scaled_mse_vs_alpha.pdf`
+- `logs/logreg_synth_ironfi_*/summary.json`
+- `logs/logreg_synth_ironfi_*/slopes.json`
 
 ---
 
@@ -164,6 +217,8 @@ After this first download, you can run all MNIST experiments **without** `--down
 
 ### Single-run benchmark (quick check)
 
+This script is mainly a quick exploratory runner. For paper-facing figures, prefer the journal script below.
+
 ```bash
 python experiments/mnist_softmax_benchmark.py \
   --data-dir data/mnist --download \
@@ -178,6 +233,8 @@ python experiments/mnist_softmax_benchmark.py \
 
 ### Grid search (10 epochs) for IRON-FI $\alpha$
 
+This quick benchmark now tunes IRON-FI on a validation split rather than on the test set.
+
 ```bash
 python experiments/mnist_softmax_benchmark.py \
   --data-dir data/mnist \
@@ -190,21 +247,31 @@ python experiments/mnist_softmax_benchmark.py \
 
 ### Journal run (25 epochs, multi-seed, averaged curves + summary table)
 
+This is the paper-facing MNIST runner. It assumes MNIST is already cached locally (see the download step above).
+
 ```bash
 python experiments/mnist_softmax_journal.py \
   --data-dir data/mnist \
   --epochs 25 \
+  --tune-epochs 10 \
   --batch-sizes 128 256 384 \
-  --ironfi-alpha-by-batch 1 1.5 2.5 \
   --seeds 0 1 2 3 4 \
   --reg 1e-4 \
   --no-show
 ```
 
 Outputs:
-- `logs/mnist_softmax_journal_*/summary.json` (mean±std final accuracy + mean±std runtime)
+- `logs/mnist_softmax_journal_*/summary.json` (selected hyperparameters, tuning records, final accuracy, runtime)
 - `figs/mnist_journal_train_loss_batch*.pdf`
 - `figs/mnist_journal_test_acc_batch*.pdf`
+- `figs/mnist_journal_test_acc_vs_time_batch*.pdf`
+- `figs/mnist_journal_ironfi_inner_batch*.pdf`
+
+Notes:
+- The journal script uses a train/validation/test protocol: tuning is done on validation, and test is reported only in the final evaluation.
+- AdamW, NAG-GS, and IRON-FI are tuned under the same selection rule (final validation accuracy after `--tune-epochs`).
+- If you do not pass explicit tuning grids, the script uses its built-in default grids for AdamW, NAG-GS, and IRON-FI.
+- The time-based accuracy plots are the main runtime-sensitive comparison and complement the epoch-based plots.
 
 ### MNIST download note (SSL)
 

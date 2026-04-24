@@ -1,7 +1,7 @@
 import os
 import time
 from dataclasses import dataclass
-from typing import Dict, Iterator, Optional
+from typing import Iterator, Optional
 
 import numpy as np
 
@@ -20,19 +20,48 @@ def iter_minibatches(indices: np.ndarray, batch_size: int) -> Iterator[np.ndarra
 @dataclass
 class RunCurves:
     train_loss: np.ndarray
-    test_acc: np.ndarray
+    val_acc: np.ndarray
+    elapsed_s: np.ndarray
+    test_acc: Optional[np.ndarray] = None
     # IRON-only extras (None for other methods)
     inner_newton: Optional[np.ndarray] = None
     inner_cg: Optional[np.ndarray] = None
     inner_res: Optional[np.ndarray] = None
 
 
+def _allocate_optional_curve(epochs: int, has_split: bool) -> Optional[np.ndarray]:
+    return np.zeros(epochs) if has_split else None
+
+
+def _evaluate_epoch(
+    theta: np.ndarray,
+    d: int,
+    C: int,
+    Xtr: np.ndarray,
+    ytr: np.ndarray,
+    Xval: np.ndarray,
+    yval: np.ndarray,
+    Xtest: Optional[np.ndarray],
+    ytest: Optional[np.ndarray],
+    reg: float,
+    perm: np.ndarray,
+) -> tuple[float, float, Optional[float]]:
+    p = SoftmaxParams.unpack(theta, d, C)
+    sub = perm[: min(10000, Xtr.shape[0])]
+    tr_loss, _ = loss_and_grad(p, Xtr[sub], ytr[sub], reg)
+    val_acc = accuracy(p, Xval, yval)
+    test_acc = accuracy(p, Xtest, ytest) if Xtest is not None and ytest is not None else None
+    return tr_loss, val_acc, test_acc
+
+
 def run_adamw(
     *,
     Xtr: np.ndarray,
     ytr: np.ndarray,
-    Xte: np.ndarray,
-    yte: np.ndarray,
+    Xval: np.ndarray,
+    yval: np.ndarray,
+    Xtest: Optional[np.ndarray],
+    ytest: Optional[np.ndarray],
     reg: float,
     epochs: int,
     batch_size: int,
@@ -50,12 +79,14 @@ def run_adamw(
     opt = AdamW(lr=lr, weight_decay=weight_decay)
 
     rows_path = os.path.join(run_dir, f"adamw_lr{lr:g}_{tag}.csv")
-    header = ["epoch", "step", "train_loss", "test_acc", "elapsed_s"]
+    header = ["epoch", "step", "train_loss", "val_acc", "test_acc", "elapsed_s"]
     t0 = time.time()
     step = 0
 
     tr_curve = np.zeros(epochs)
-    te_curve = np.zeros(epochs)
+    val_curve = np.zeros(epochs)
+    elapsed_curve = np.zeros(epochs)
+    test_curve = _allocate_optional_curve(epochs, Xtest is not None and ytest is not None)
 
     for ep in range(epochs):
         perm = rng.permutation(Xtr.shape[0])
@@ -65,28 +96,37 @@ def run_adamw(
             theta = opt.step(theta, g.pack())
             step += 1
 
-        p = SoftmaxParams.unpack(theta, d, C)
-        sub = perm[: min(10000, Xtr.shape[0])]
-        tr_loss, _ = loss_and_grad(p, Xtr[sub], ytr[sub], reg)
-        te_acc = accuracy(p, Xte, yte)
+        tr_loss, val_acc, test_acc = _evaluate_epoch(theta, d, C, Xtr, ytr, Xval, yval, Xtest, ytest, reg, perm)
         tr_curve[ep] = tr_loss
-        te_curve[ep] = te_acc
+        val_curve[ep] = val_acc
+        elapsed_curve[ep] = time.time() - t0
+        if test_curve is not None and test_acc is not None:
+            test_curve[ep] = test_acc
 
         append_csv_row(
             rows_path,
-            {"epoch": ep, "step": step, "train_loss": tr_loss, "test_acc": te_acc, "elapsed_s": time.time() - t0},
+            {
+                "epoch": ep,
+                "step": step,
+                "train_loss": tr_loss,
+                "val_acc": val_acc,
+                "test_acc": float(test_acc) if test_acc is not None else np.nan,
+                "elapsed_s": elapsed_curve[ep],
+            },
             header=header,
         )
 
-    return RunCurves(train_loss=tr_curve, test_acc=te_curve)
+    return RunCurves(train_loss=tr_curve, val_acc=val_curve, test_acc=test_curve, elapsed_s=elapsed_curve)
 
 
 def run_naggs(
     *,
     Xtr: np.ndarray,
     ytr: np.ndarray,
-    Xte: np.ndarray,
-    yte: np.ndarray,
+    Xval: np.ndarray,
+    yval: np.ndarray,
+    Xtest: Optional[np.ndarray],
+    ytest: Optional[np.ndarray],
     reg: float,
     epochs: int,
     batch_size: int,
@@ -105,12 +145,14 @@ def run_naggs(
     gamma = float(gamma0)
 
     rows_path = os.path.join(run_dir, f"naggs_alpha{alpha:g}_{tag}.csv")
-    header = ["epoch", "step", "train_loss", "test_acc", "gamma", "elapsed_s"]
+    header = ["epoch", "step", "train_loss", "val_acc", "test_acc", "gamma", "elapsed_s"]
     t0 = time.time()
     step = 0
 
     tr_curve = np.zeros(epochs)
-    te_curve = np.zeros(epochs)
+    val_curve = np.zeros(epochs)
+    elapsed_curve = np.zeros(epochs)
+    test_curve = _allocate_optional_curve(epochs, Xtest is not None and ytest is not None)
 
     for ep in range(epochs):
         perm = rng.permutation(Xtr.shape[0])
@@ -123,28 +165,38 @@ def run_naggs(
             x, v, gamma = nag_gs_step(x=x, v=v, gamma=gamma, alpha=alpha, mu=mu, grad_at_xnext=grad_at)
             step += 1
 
-        p = SoftmaxParams.unpack(x, d, C)
-        sub = perm[: min(10000, Xtr.shape[0])]
-        tr_loss, _ = loss_and_grad(p, Xtr[sub], ytr[sub], reg)
-        te_acc = accuracy(p, Xte, yte)
+        tr_loss, val_acc, test_acc = _evaluate_epoch(x, d, C, Xtr, ytr, Xval, yval, Xtest, ytest, reg, perm)
         tr_curve[ep] = tr_loss
-        te_curve[ep] = te_acc
+        val_curve[ep] = val_acc
+        elapsed_curve[ep] = time.time() - t0
+        if test_curve is not None and test_acc is not None:
+            test_curve[ep] = test_acc
 
         append_csv_row(
             rows_path,
-            {"epoch": ep, "step": step, "train_loss": tr_loss, "test_acc": te_acc, "gamma": gamma, "elapsed_s": time.time() - t0},
+            {
+                "epoch": ep,
+                "step": step,
+                "train_loss": tr_loss,
+                "val_acc": val_acc,
+                "test_acc": float(test_acc) if test_acc is not None else np.nan,
+                "gamma": gamma,
+                "elapsed_s": elapsed_curve[ep],
+            },
             header=header,
         )
 
-    return RunCurves(train_loss=tr_curve, test_acc=te_curve)
+    return RunCurves(train_loss=tr_curve, val_acc=val_curve, test_acc=test_curve, elapsed_s=elapsed_curve)
 
 
 def run_ironfi(
     *,
     Xtr: np.ndarray,
     ytr: np.ndarray,
-    Xte: np.ndarray,
-    yte: np.ndarray,
+    Xval: np.ndarray,
+    yval: np.ndarray,
+    Xtest: Optional[np.ndarray],
+    ytest: Optional[np.ndarray],
     reg: float,
     epochs: int,
     batch_size: int,
@@ -173,12 +225,14 @@ def run_ironfi(
     else:
         rows_path = os.path.join(run_dir, f"ironfi_alpha{alpha:g}_{tag}.csv")
 
-    header = ["epoch", "step", "train_loss", "test_acc", "gamma", "inner_newton", "inner_cg", "inner_res", "elapsed_s"]
+    header = ["epoch", "step", "train_loss", "val_acc", "test_acc", "gamma", "inner_newton", "inner_cg", "inner_res", "elapsed_s"]
     t0 = time.time()
     step = 0
 
     tr_curve = np.zeros(epochs)
-    te_curve = np.zeros(epochs)
+    val_curve = np.zeros(epochs)
+    elapsed_curve = np.zeros(epochs)
+    test_curve = _allocate_optional_curve(epochs, Xtest is not None and ytest is not None)
     in_curve = np.zeros(epochs)
     icg_curve = np.zeros(epochs)
     ir_curve = np.zeros(epochs)
@@ -231,13 +285,12 @@ def run_ironfi(
             inner_cg_hist.append(inner.n_cg_total)
             inner_res_hist.append(inner.final_residual_norm)
 
-        p = SoftmaxParams.unpack(x, d, C)
-        sub = perm[: min(10000, Xtr.shape[0])]
-        tr_loss, _ = loss_and_grad(p, Xtr[sub], ytr[sub], reg)
-        te_acc = accuracy(p, Xte, yte)
-
+        tr_loss, val_acc, test_acc = _evaluate_epoch(x, d, C, Xtr, ytr, Xval, yval, Xtest, ytest, reg, perm)
         tr_curve[ep] = tr_loss
-        te_curve[ep] = te_acc
+        val_curve[ep] = val_acc
+        elapsed_curve[ep] = time.time() - t0
+        if test_curve is not None and test_acc is not None:
+            test_curve[ep] = test_acc
         in_curve[ep] = float(np.mean(inner_newton_hist))
         icg_curve[ep] = float(np.mean(inner_cg_hist))
         ir_curve[ep] = float(np.mean(inner_res_hist))
@@ -248,19 +301,22 @@ def run_ironfi(
                 "epoch": ep,
                 "step": step,
                 "train_loss": tr_loss,
-                "test_acc": te_acc,
+                "val_acc": val_acc,
+                "test_acc": float(test_acc) if test_acc is not None else np.nan,
                 "gamma": gamma,
                 "inner_newton": in_curve[ep],
                 "inner_cg": icg_curve[ep],
                 "inner_res": ir_curve[ep],
-                "elapsed_s": time.time() - t0,
+                "elapsed_s": elapsed_curve[ep],
             },
             header=header,
         )
 
     return RunCurves(
         train_loss=tr_curve,
-        test_acc=te_curve,
+        val_acc=val_curve,
+        test_acc=test_curve,
+        elapsed_s=elapsed_curve,
         inner_newton=in_curve,
         inner_cg=icg_curve,
         inner_res=ir_curve,
