@@ -87,14 +87,14 @@ Generated outputs:
 
 This script now serves two purposes:
 - validate the theorem-facing quadratic quantity
-  \[
+  $$
   \widehat{\mathrm{MSE}}_k=\frac1N\sum_{j=1}^N \|x_k^{(j)}-x^\star\|^2
-  \]
+  $$
   together with its bias/variance decomposition
-  \[
+  $$
   \widehat{\mathrm{MSE}}_k=\|\bar x_k-x^\star\|^2+\mathrm{tr}\!\big(\widehat{\mathrm{Cov}}(x_k)\big),
-  \]
-- check the stationary quadratic prediction by plotting $\alpha\,\widehat{\mathrm{MSE}}_\infty$ against $\alpha$ and comparing it with the exact discrete-Lyapunov stationary MSE and the asymptotic constant \(C_{\mathrm{quad}}\).
+  $$
+- check the stationary quadratic prediction by plotting $\alpha\,\widehat{\mathrm{MSE}}_\infty$ against $\alpha$ and comparing it with the exact discrete-Lyapunov stationary MSE and the asymptotic constant $C_{\mathrm{quad}}$.
 
 Running
 
@@ -117,10 +117,10 @@ and also:
 Interpretation of the outputs:
 - `quad_mean_alpha{α}.pdf`: ensemble MSE, squared bias, covariance trace, and mean error over iterations.
 - `quad_clouds_alpha{α}.pdf`: qualitative projected particle clouds (initial vs late-time final state).
-- `quad_stationary_scaled_mse.pdf`: empirical \(\alpha\,\widehat{\mathrm{MSE}}_\infty\), exact Lyapunov \(\alpha\,\mathrm{MSE}_\infty\), and the asymptotic constant \(C_{\mathrm{quad}}\).
+- `quad_stationary_scaled_mse.pdf`: empirical $\alpha\,\widehat{\mathrm{MSE}}_\infty$, exact Lyapunov $\alpha\,\mathrm{MSE}_\infty$, and the asymptotic constant $C_{\mathrm{quad}}$.
 
 Notes:
-- The stationary-constant validation is done in the fixed-\(\gamma\) setting (`--gamma-mode fixed`), which is the default and matches the exact Lyapunov formula used in the script.
+- The stationary-constant validation is done in the fixed-$\gamma$ setting (`--gamma-mode fixed`), which is the default and matches the exact Lyapunov formula used in the script.
 - The cloud figures are intentionally qualitative; the main quantitative comparison to theory is carried by `quad_mean_alpha*.pdf` and `quad_stationary_scaled_mse.pdf`.
 
 ---
