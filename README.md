@@ -87,20 +87,16 @@ Generated outputs:
 
 This script now serves two purposes:
 - validate the theorem-facing quadratic quantity
-  $$
-  \widehat{\mathrm{MSE}}_k=\frac1N\sum_{j=1}^N \|x_k^{(j)}-x^\star\|^2
-  $$
+  $\widehat{\mathrm{MSE}}_k=\frac1N\sum_{j=1}^N \|x_k^{(j)}-x^\star\|^2$
   together with its bias/variance decomposition
-  $$
-  \widehat{\mathrm{MSE}}_k=\|\bar x_k-x^\star\|^2+\mathrm{tr}\!\big(\widehat{\mathrm{Cov}}(x_k)\big),
-  $$
+  $\widehat{\mathrm{MSE}}_k=\|\bar x_k-x^\star\|^2+\mathrm{tr}\!\big(\widehat{\mathrm{Cov}}(x_k)\big),$
 - check the stationary quadratic prediction by plotting $\alpha\,\widehat{\mathrm{MSE}}_\infty$ against $\alpha$ and comparing it with the exact discrete-Lyapunov stationary MSE and the asymptotic constant $C_{\mathrm{quad}}$.
 
 Running
 
 ```bash
 python experiments/quad_iron_fi.py \
-  --alpha-scale 1 10 20 500 \
+  --alpha-scale 1 10 200 500 \
   --nsamples 20000 --iters 100 --sigma 1.0 --seed 0 \
   --eigs 1.0 1.0 3.0 \
   --save-figs --no-show
