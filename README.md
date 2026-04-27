@@ -54,31 +54,31 @@ x_{k+1}
 
 ---
 
-## Quickstart (reproduce figures)
+## Quickstart
 
-From the repo root:
+The following commands reproduce the experiments on macOS/Linux from the repository root.
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install --upgrade pip setuptools wheel
-pip install -r requirements.txt
 
-# Recommended: install the repo in editable mode (avoids PYTHONPATH)
-pip install -e .
+python -m pip install --upgrade pip setuptools wheel
+python -m pip install -r requirements.txt
 
-# Headless plotting + local Matplotlib cache
+# Recommended for local development and reproducibility:
+python -m pip install -e .
+
+# Headless plotting and local Matplotlib cache:
+mkdir -p .mplcache
 export MPLBACKEND=Agg
 export MPLCONFIGDIR=$(pwd)/.mplcache
-```
 
 Then run any experiment command in the sections below.
 
-If you hit an import error like `ModuleNotFoundError: No module named 'plots'`, it usually means
-the editable install step was skipped or not run from the repo root. Re-run:
+If you get an import error such as `ModuleNotFoundError: No module named 'plots'`, it usually means that the editable install was skipped or was not run from the repository root. Re-run
 
 ```bash
-pip install -e .
+python -m pip install -e .
 ```
 
 ---
@@ -126,11 +126,11 @@ Generated outputs:
 
 ---
 
-## Quadratic experiment (paper figure regeneration)
+## Quadratic experiment
 
-This script serves two purposes.
+This experiment is the closest one to the theory. It is used to check both the finite-time ensemble quantities and the stationary quadratic prediction.
 
-First, it validates the theorem-facing quadratic mean-square error:
+The script first computes the empirical mean-square error
 
 ```math
 \widehat{\mathrm{MSE}}_k
