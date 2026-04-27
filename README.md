@@ -86,11 +86,38 @@ Generated outputs:
 ## Quadratic experiment (paper figure regeneration)
 
 This script now serves two purposes:
-- validate the theorem-facing quadratic quantity
-  $\widehat{\mathrm{MSE}}_k=\frac1N\sum_{j=1}^N \|x_k^{(j)}-x^\star\|^2$
-  together with its bias/variance decomposition
-  $\widehat{\mathrm{MSE}}_k=\|\bar x_k-x^\star\|^2+\mathrm{tr}\!\big(\widehat{\mathrm{Cov}}(x_k)\big),$
-- check the stationary quadratic prediction by plotting $\alpha\,\widehat{\mathrm{MSE}}_\infty$ against $\alpha$ and comparing it with the exact discrete-Lyapunov stationary MSE and the asymptotic constant $C_{\mathrm{quad}}$.
+
+- Validate the theorem-facing quadratic quantity
+
+  $$
+  \widehat{\mathrm{MSE}}_k
+  =
+  \frac{1}{N}
+  \sum_{j=1}^{N}
+  \left\|x_k^{(j)}-x^\star\right\|^2
+  $$
+
+  together with its bias--variance decomposition
+
+  $$
+  \widehat{\mathrm{MSE}}_k
+  =
+  \left\|\bar x_k-x^\star\right\|^2
+  +
+  \mathrm{tr}\!\left(\widehat{\mathrm{Cov}}(x_k)\right).
+  $$
+
+- Check the stationary quadratic prediction by plotting
+
+  $$
+  \alpha\,\widehat{\mathrm{MSE}}_\infty
+  $$
+
+  against \(\alpha\), and comparing it with the exact discrete-Lyapunov stationary MSE and the asymptotic constant
+
+  $$
+  C_{\mathrm{quad}}.
+  $$
 
 Running
 
