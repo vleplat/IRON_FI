@@ -208,13 +208,15 @@ Notes:
 
 ---
 
-## Nonconvex experiment (NumPy, log-cosh)
+## Nonconvex experiment: log-cosh model
 
-This script is intended as a **qualitative / illustrative** nonconvex experiment, not as a theorem-validation figure.
-It now distinguishes:
-- a last-iterate cloud,
-- a pooled late-time cloud after burn-in,
-- and objective-slice overlays built from the pooled late-time samples.
+This experiment is qualitative. It is not intended as a theorem-validation figure.
+
+The goal is to visualize how the late-time particle clouds change as alpha increases in a nonconvex log-cosh example. The script produces three types of plots:
+
+- the mean-iterate norm proxy;
+- the last-iterate projected cloud;
+- objective-slice plots with pooled late-time samples after burn-in.
 
 Running
 
@@ -237,9 +239,11 @@ and:
 - `logs/nonconvex_alpha{α}_seed<seed>.json`
 
 Interpretation of the outputs:
-- `ncx_numpy_alpha{α}_mean_norm.pdf`: mean-iterate norm proxy only; this is not a theorem-level quantity.
-- `ncx_numpy_alpha{α}_cloud.pdf`: top row = last-iterate projected clouds, bottom row = pooled late-time projected clouds after burn-in.
-- `logcosh_slices_alpha{α}.pdf`: objective slices with projected late-time clouds.
+
+- `ncx_numpy_alpha<alpha>_mean_norm.pdf`: mean-iterate norm proxy. This is a qualitative diagnostic, not a theorem-level quantity.
+- `ncx_numpy_alpha<alpha>_cloud.pdf`: projected particle clouds. The top row shows last iterates; the bottom row shows pooled late-time iterates after burn-in.
+- `logcosh_slices_alpha<alpha>.pdf`: two-dimensional objective slices with projected late-time samples.
+
 
 Notes:
 - The default `--burn-frac 0.5` means the pooled cloud uses the last half of the run.
@@ -248,14 +252,17 @@ Notes:
 
 ---
 
-## Synthetic ridge-logistic regression (IRON-only)
+## Synthetic ridge-logistic regression
 
-This suite validates:
-- stationary MSE scaling $\widehat{\mathrm{MSE}}(\alpha)\sim 1/\alpha$ (slope close to \(-1\) on log–log),
-- tolerance sweep showing $\varepsilon$ does not need to shrink with $\alpha$,
-- mean inner LM/Newton iterations vs $\alpha$,
-- confidence intervals on the fitted slope across seeds,
-- scaled-MSE diagnostics to show when a tolerance breaks the \(1/\alpha\) trend.
+This experiment tests the theory-inspired stationary scaling in a nonlinear strongly convex problem.
+
+The script studies:
+
+- the stationary MSE as a function of alpha, with an expected large-alpha trend close to `1/alpha`;
+- the fitted log--log slope across several random seeds;
+- the effect of the inner tolerance on the observed scaling;
+- the mean number of inner Newton/LM iterations;
+- the scaled-MSE diagnostic used to detect when the tolerance is too loose.
 
 ```bash
 python experiments/logreg_synth_ironfi.py \
@@ -278,9 +285,11 @@ Outputs:
 
 ---
 
-## MNIST softmax regression benchmark (IRON-FI vs NAG-GS vs AdamW)
+## MNIST softmax regression benchmark
 
-MNIST is downloaded and cached under `data/mnist/` by the loader.
+This benchmark compares IRON-FI with NAG-GS and AdamW on softmax regression for MNIST. The purpose is not to claim state-of-the-art MNIST performance, but to compare stability, accuracy, and computational cost in a standard supervised-learning setting.
+
+MNIST is downloaded and cached under `data/mnist/` by the dataset loader.
 
 ### MNIST download (first run)
 
