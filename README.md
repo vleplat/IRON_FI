@@ -1,13 +1,56 @@
 # IRON-FI: Implicit Resolvent Optimization under Noise
 
-This repository contains the Python implementation of **IRON-FI** (fully implicit resolvent / Backward–Euler discretization) and the experimental suite used in the IRON preprint.
+This repository contains the Python implementation of **IRON-FI** and the scripts used to reproduce the numerical experiments from the IRON-FI preprint.
 
-Core IRON-FI steps:
-- **Center**: $c_k = (v_k + \tau_k x_k)/(1+\tau_k)$
-- **Parameters**: $\tau_k = 1/\alpha_k + \mu/\gamma_k$, $\lambda_k = \alpha_k/(\gamma_k(1+\tau_k))$
-- **Noise as center perturbation**: $\xi_k = (\sqrt{\alpha_k}/(1+\tau_k))\ \sigma\ \eta_k$, $\eta_k\sim\mathcal N(0,I)$
-- **Resolvent step**: $x_{k+1} = \mathrm{prox}_{\lambda_k f}(c_k+\xi_k)$
-- **State updates**: $v_{k+1}=x_{k+1} + (x_{k+1}-x_k)/\alpha_k$, $\gamma_{k+1}=(\gamma_k+\alpha_k\mu)/(1+\alpha_k)$
+IRON-FI is a fully implicit stochastic optimizer derived from an accelerated stochastic flow. Each outer iteration is written as a resolvent, or proximal, step with a noisy center. In the implementation, this implicit step is solved by Newton, Levenberg--Marquardt, or trust-region-type inner iterations. The main theoretical mechanism is that the implicit discretization attenuates stochastic perturbations as the stepsize parameter alpha increases, leading under strong convexity to an `O(1/alpha)` stationary mean-square error regime.
+
+For reference, the main IRON-FI update has the following form.
+
+**Center**
+
+```math
+c_k = \frac{v_k+\tau_k x_k}{1+\tau_k}
+```
+
+**Parameters**
+
+```math
+\tau_k = \frac{1}{\alpha_k}+\frac{\mu}{\gamma_k},
+\qquad
+\lambda_k = \frac{\alpha_k}{\gamma_k(1+\tau_k)}
+```
+
+**Noise as center perturbation**
+
+```math
+\xi_k
+=
+\frac{\sqrt{\alpha_k}}{1+\tau_k}\,\sigma\,\eta_k,
+\qquad
+\eta_k\sim\mathcal{N}(0,I)
+```
+
+**Resolvent step**
+
+```math
+x_{k+1}
+=
+\mathrm{prox}_{\lambda_k f}(c_k+\xi_k)
+```
+
+**State updates**
+
+```math
+v_{k+1}
+=
+x_{k+1}
++
+\frac{x_{k+1}-x_k}{\alpha_k},
+\qquad
+\gamma_{k+1}
+=
+\frac{\gamma_k+\alpha_k\mu}{1+\alpha_k}
+```
 
 ---
 
