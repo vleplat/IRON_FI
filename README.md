@@ -85,7 +85,7 @@ Generated outputs:
 
 ## Quadratic experiment (paper figure regeneration)
 
-This script now serves two purposes.
+This script serves two purposes.
 
 First, it validates the theorem-facing quadratic mean-square error:
 
@@ -104,7 +104,7 @@ It also reports the associated bias--variance decomposition:
 =
 \left\|\bar{x}_k-x^\star\right\|^2
 +
-\operatorname{tr}\!\left(\widehat{\operatorname{Cov}}(x_k)\right).
+\mathrm{tr}\!\left(\widehat{\mathrm{Cov}}(x_k)\right).
 ```
 
 Second, it checks the stationary quadratic prediction by plotting the scaled stationary quantity
