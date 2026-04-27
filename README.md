@@ -78,8 +78,7 @@ Then run any experiment command in the sections below.
 If you get an import error such as `ModuleNotFoundError: No module named 'plots'`, it usually means that the editable install was skipped or was not run from the repository root. Re-run
 
 ```bash
-python -m pip install -e .
-```
+python -m pip install -e .```
 
 ---
 
