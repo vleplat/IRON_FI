@@ -390,6 +390,22 @@ The JAX script (`experiments/nonconvex_iron_fi_jax.py`) mirrors the NumPy noncon
 
 ---
 
+## 📄 Citation
+
+If you use IRON in your research, please cite our paper:
+
+```bibtex
+@misc{leplat2026ironimplicitresolventoptimization,
+      title={IRON: Implicit Resolvent Optimization under Noise}, 
+      author={Valentin Leplat and Roland Hildebrand},
+      year={2026},
+      eprint={2605.04561},
+      archivePrefix={arXiv},
+      primaryClass={math.OC},
+      url={https://arxiv.org/abs/2605.04561}, 
+}
+```
+
 ## 📄 License
 
 This project is licensed under the **MIT License** (see `LICENSE`).
